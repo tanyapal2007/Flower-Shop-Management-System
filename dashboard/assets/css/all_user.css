@@ -1,0 +1,372 @@
+/* =========================================
+   ALL USER PAGE CSS
+========================================= */
+
+
+/* =========================================
+   PAGE CONTENT
+========================================= */
+
+.content {
+    padding: 20px;
+}
+
+
+/* =========================================
+   PAGE TITLE
+========================================= */
+
+.page-title-section {
+    margin-bottom: 25px;
+}
+
+.page-title-section h2 {
+    color: #2A3F54;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.page-title-section p {
+    color: #777;
+    margin-bottom: 0;
+}
+
+
+/* =========================================
+   ADMIN CARD
+========================================= */
+
+.admin-card {
+    background: #ffffff;
+    border: 1px solid #E6E9ED;
+    border-radius: 4px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+
+.admin-card img {
+    width: 85px;
+    height: 85px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid #E6E9ED;
+}
+
+
+/* =========================================
+   ADMIN DETAILS
+========================================= */
+
+.admin-name {
+    color: #2A3F54;
+    font-size: 23px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+
+.admin-detail {
+    color: #777;
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+
+.admin-detail i {
+    color: #26B99A;
+    margin-right: 6px;
+}
+
+
+/* =========================================
+   SUMMARY CARDS
+========================================= */
+
+.summary-card {
+    background: #ffffff;
+    border: 1px solid #E6E9ED;
+    border-radius: 4px;
+    padding: 22px;
+    height: 100%;
+    min-height: 170px;
+    transition: 0.3s;
+}
+
+
+.summary-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+}
+
+
+/* =========================================
+   SUMMARY ICON
+========================================= */
+
+.summary-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #26B99A;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 15px;
+}
+
+
+/* =========================================
+   SUMMARY NUMBER
+========================================= */
+
+.summary-number {
+    color: #2A3F54;
+    font-size: 26px;
+    font-weight: 600;
+    word-break: break-word;
+}
+
+
+/* =========================================
+   SUMMARY TITLE
+========================================= */
+
+.summary-title {
+    color: #777;
+    font-size: 14px;
+    margin-top: 5px;
+}
+
+
+/* =========================================
+   TABLE CARD
+========================================= */
+
+.table-card {
+    background: #ffffff;
+    border: 1px solid #E6E9ED;
+    border-radius: 4px;
+    margin-top: 20px;
+    margin-bottom: 30px;
+}
+
+
+/* =========================================
+   TABLE HEADER
+========================================= */
+
+.table-card-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid #E6E9ED;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+
+.table-card-header h3 {
+    color: #2A3F54;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+}
+
+
+.table-card-header h3 i {
+    color: #26B99A;
+    margin-right: 7px;
+}
+
+
+/* =========================================
+   TABLE BODY
+========================================= */
+
+.table-card-body {
+    padding: 20px;
+}
+
+
+/* =========================================
+   USER TABLE
+========================================= */
+
+.user-table {
+    margin-bottom: 0;
+    width: 100%;
+}
+
+
+.user-table thead th {
+    background: #2A3F54 !important;
+    color: #ffffff !important;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle !important;
+    padding: 13px 12px !important;
+}
+
+
+.user-table tbody td {
+    vertical-align: middle !important;
+    color: #555;
+    font-size: 14px;
+    padding: 12px !important;
+}
+
+
+.user-table tbody tr {
+    transition: 0.2s;
+}
+
+
+.user-table tbody tr:hover {
+    background-color: #f5f7f8 !important;
+}
+
+
+/* =========================================
+   USER PROFILE IMAGE
+========================================= */
+
+.user-image {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #E6E9ED;
+}
+
+
+/* =========================================
+   USER NAME
+========================================= */
+
+.user-name {
+    color: #2A3F54;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+
+.user-id {
+    color: #999;
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+
+/* =========================================
+   BADGES
+========================================= */
+
+.badge {
+    padding: 7px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 3px;
+}
+
+
+/* =========================================
+   BUTTONS
+========================================= */
+
+.user-table .btn {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 3px;
+}
+
+
+.user-table .btn i {
+    margin-right: 3px;
+}
+
+
+/* =========================================
+   TABLE RESPONSIVE
+========================================= */
+
+.table-responsive {
+    border: 1px solid #E6E9ED;
+    border-radius: 3px;
+}
+
+
+/* =========================================
+   ALERT
+========================================= */
+
+.alert {
+    border-radius: 4px;
+}
+
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 991px) {
+
+    .content {
+        padding: 15px;
+    }
+
+    .admin-card {
+        padding: 20px;
+    }
+
+    .summary-card {
+        margin-bottom: 15px;
+    }
+
+}
+
+
+@media (max-width: 767px) {
+
+    .content {
+        padding: 10px;
+    }
+
+
+    .admin-card {
+        text-align: center;
+        padding: 20px 15px;
+    }
+
+
+    .admin-card .d-flex {
+        justify-content: center;
+    }
+
+
+    .table-card-header {
+        padding: 15px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+
+    .table-card-body {
+        padding: 10px;
+    }
+
+
+    .summary-card {
+        min-height: auto;
+    }
+
+
+    .page-title-section h2 {
+        font-size: 23px;
+    }
+
+}
