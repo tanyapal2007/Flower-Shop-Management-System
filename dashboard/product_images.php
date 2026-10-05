@@ -1,288 +1,840 @@
+```php
 <?php
 
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once "../config/database.php";
+
+
 /* =========================================================
-   DATABASE
+   CHECK LOGIN
 ========================================================= */
 
-include "../config/database.php";
+$login_user_id = $_SESSION['user_id'] ?? 0;
+
+if (empty($login_user_id)) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+/* =========================================================
+   CHECK ADMIN
+========================================================= */
+
+$admin_sql = "
+    SELECT
+        user_id,
+        name,
+        phone,
+        role,
+        status,
+        created_at
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+";
+
+$admin_stmt = $conn->prepare($admin_sql);
+
+$admin_stmt->execute([
+    ':user_id' => $login_user_id
+]);
+
+$admin = $admin_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+if (!$admin) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+if ((int)$admin['status'] !== 1) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+if ($admin['role'] !== 'admin') {
+    header("Location: ../index.php");
+    exit;
+}
 
 
 /* =========================================================
    GET PRODUCT ID
 ========================================================= */
 
-if (!isset($_GET['product_id']) || !is_numeric($_GET['product_id'])) {
-
-    header("Location: products.php");
-    exit;
-}
-
-$product_id = intval($_GET['product_id']);
+$product_id = isset($_GET['product_id'])
+    ? (int)$_GET['product_id']
+    : 0;
 
 
 /* =========================================================
-   CHECK PRODUCT
+   PRODUCT ID CHECK
 ========================================================= */
 
-$product_sql = "
-    SELECT product_id, product_name
-    FROM products
-    WHERE product_id = $product_id
-";
+if ($product_id <= 0) {
+?>
 
-$product_result = mysqli_query($conn, $product_sql);
+    <!DOCTYPE html>
+    <html lang="en">
 
-if (!$product_result || mysqli_num_rows($product_result) == 0) {
+    <head>
 
-    header("Location: products.php");
+        <meta charset="utf-8">
+
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1">
+
+        <title>Product Images</title>
+
+        <link
+            href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
+            rel="stylesheet">
+
+        <link
+            href="assets/vendors/font-awesome/css/font-awesome.min.css"
+            rel="stylesheet">
+
+        <link
+            href="assets/css/custom.min.css"
+            rel="stylesheet">
+
+    </head>
+
+    <body class="nav-md">
+
+        <div class="container body">
+
+            <div class="main_container">
+
+                <?php include "sidebar.php"; ?>
+
+
+                <div class="right_col" role="main">
+
+                    <div class="top_nav">
+
+                        <div class="nav_menu">
+
+                            <nav>
+
+                                <div class="nav toggle">
+
+                                    <a id="menu_toggle">
+                                        <i class="fa fa-bars"></i>
+                                    </a>
+
+                                </div>
+
+                                <ul class="nav navbar-nav navbar-right">
+
+                                    <li>
+
+                                        <a
+                                            href="javascript:;"
+                                            class="user-profile dropdown-toggle"
+                                            data-toggle="dropdown">
+
+                                            <img
+                                                src="assets/images/img.jpg"
+                                                alt="Profile">
+
+                                            <?php
+                                            echo htmlspecialchars(
+                                                $admin['name']
+                                            );
+                                            ?>
+
+                                            <span class="fa fa-angle-down"></span>
+
+                                        </a>
+
+                                        <ul class="dropdown-menu dropdown-usermenu pull-right">
+
+                                            <li>
+
+                                                <a href="../logout.php">
+
+                                                    <i class="fa fa-sign-out pull-right"></i>
+
+                                                    Log Out
+
+                                                </a>
+
+                                            </li>
+
+                                        </ul>
+
+                                    </li>
+
+                                </ul>
+
+                            </nav>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="container-fluid">
+
+                        <div
+                            class="alert alert-danger"
+                            style="margin-top:30px;">
+
+                            <h4>
+                                <i class="fa fa-exclamation-triangle"></i>
+                                Product ID Missing
+                            </h4>
+
+                            <p>
+                                Please open Product Images from the
+                                Products page using the Product Images button.
+                            </p>
+
+                            <br>
+
+                            <a
+                                href="products.php"
+                                class="btn btn-primary">
+
+                                <i class="fa fa-arrow-left"></i>
+
+                                Back to Products
+
+                            </a>
+
+                        </div>
+
+                    </div>
+
+
+                    <footer>
+
+                        <div class="pull-right">
+
+                            Product Management Admin Panel
+
+                        </div>
+
+                        <div class="clearfix"></div>
+
+                    </footer>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <script
+            src="assets/vendors/jquery/dist/jquery.min.js">
+        </script>
+
+        <script
+            src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
+        </script>
+
+        <script
+            src="assets/js/custom.min.js">
+        </script>
+
+    </body>
+
+    </html>
+
+<?php
     exit;
 }
 
-$product = mysqli_fetch_assoc($product_result);
+
+/* =========================================================
+   VARIABLES
+========================================================= */
+
+$error = "";
+$success = "";
+
+
+/* =========================================================
+   UPLOAD DIRECTORY
+========================================================= */
+
+$upload_dir = "../uploads/products/";
+
+
+if (!is_dir($upload_dir)) {
+
+    mkdir(
+        $upload_dir,
+        0777,
+        true
+    );
+}
+
+
+/* =========================================================
+   FETCH PRODUCT
+========================================================= */
+
+$product_sql = "
+    SELECT
+        p.product_id,
+        p.product_name,
+        p.product_code,
+        p.stock_quantity,
+        p.product_description,
+        p.brand_name,
+        p.color,
+        p.size,
+        p.material,
+        p.status,
+
+        ps.subcategory_name,
+
+        pc.category_name
+
+    FROM products p
+
+    LEFT JOIN product_subcategory ps
+        ON p.subcategory_id = ps.subcategory_id
+
+    LEFT JOIN product_category pc
+        ON ps.category_id = pc.category_id
+
+    WHERE p.product_id = :product_id
+
+    LIMIT 1
+";
+
+
+try {
+
+    $product_stmt = $conn->prepare($product_sql);
+
+    $product_stmt->execute([
+        ':product_id' => $product_id
+    ]);
+
+    $product = $product_stmt->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+
+    $product = false;
+
+    $error = $e->getMessage();
+}
+
+
+/* =========================================================
+   PRODUCT NOT FOUND
+========================================================= */
+
+if (!$product) {
+
+?>
+
+    <!DOCTYPE html>
+    <html lang="en">
+
+    <head>
+
+        <meta charset="utf-8">
+
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1">
+
+        <title>Product Not Found</title>
+
+        <link
+            href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
+            rel="stylesheet">
+
+        <link
+            href="assets/vendors/font-awesome/css/font-awesome.min.css"
+            rel="stylesheet">
+
+        <link
+            href="assets/css/custom.min.css"
+            rel="stylesheet">
+
+    </head>
+
+    <body class="nav-md">
+
+        <div class="container body">
+
+            <div class="main_container">
+
+                <?php include "sidebar.php"; ?>
+
+
+                <div class="right_col" role="main">
+
+                    <div class="top_nav">
+
+                        <div class="nav_menu">
+
+                            <nav>
+
+                                <div class="nav toggle">
+
+                                    <a id="menu_toggle">
+
+                                        <i class="fa fa-bars"></i>
+
+                                    </a>
+
+                                </div>
+
+                                <ul class="nav navbar-nav navbar-right">
+
+                                    <li>
+
+                                        <a
+                                            href="javascript:;"
+                                            class="user-profile dropdown-toggle"
+                                            data-toggle="dropdown">
+
+                                            <img
+                                                src="assets/images/img.jpg"
+                                                alt="Profile">
+
+                                            <?php
+                                            echo htmlspecialchars(
+                                                $admin['name']
+                                            );
+                                            ?>
+
+                                            <span class="fa fa-angle-down"></span>
+
+                                        </a>
+
+                                        <ul class="dropdown-menu dropdown-usermenu pull-right">
+
+                                            <li>
+
+                                                <a href="../logout.php">
+
+                                                    <i class="fa fa-sign-out pull-right"></i>
+
+                                                    Log Out
+
+                                                </a>
+
+                                            </li>
+
+                                        </ul>
+
+                                    </li>
+
+                                </ul>
+
+                            </nav>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="container-fluid">
+
+                        <div
+                            class="alert alert-danger"
+                            style="margin-top:30px;">
+
+                            <h4>
+
+                                <i class="fa fa-exclamation-triangle"></i>
+
+                                Product Not Found
+
+                            </h4>
+
+                            <p>
+                                Product ID:
+                                <strong>
+                                    <?php echo (int)$product_id; ?>
+                                </strong>
+                                does not exist.
+                            </p>
+
+                            <?php if (!empty($error)) { ?>
+
+                                <hr>
+
+                                <p>
+                                    <?php
+                                    echo htmlspecialchars($error);
+                                    ?>
+                                </p>
+
+                            <?php } ?>
+
+                            <br>
+
+                            <a
+                                href="products.php"
+                                class="btn btn-primary">
+
+                                <i class="fa fa-arrow-left"></i>
+
+                                Back to Products
+
+                            </a>
+
+                        </div>
+
+                    </div>
+
+
+                    <footer>
+
+                        <div class="pull-right">
+
+                            Product Management Admin Panel
+
+                        </div>
+
+                        <div class="clearfix"></div>
+
+                    </footer>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <script
+            src="assets/vendors/jquery/dist/jquery.min.js">
+        </script>
+
+        <script
+            src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
+        </script>
+
+        <script
+            src="assets/js/custom.min.js">
+        </script>
+
+    </body>
+
+    </html>
+
+<?php
+
+    exit;
+}
 
 
 /* =========================================================
    DELETE IMAGE
 ========================================================= */
 
-if (isset($_GET['delete'])) {
+if (isset($_GET['delete_image'])) {
 
-    $image_id = intval($_GET['delete']);
-
-
-    /* GET IMAGE NAME */
-
-    $image_sql = "
-        SELECT image_name
-        FROM product_images
-        WHERE image_id = $image_id
-        AND product_id = $product_id
-    ";
-
-    $image_result = mysqli_query($conn, $image_sql);
+    $image_id = (int)$_GET['delete_image'];
 
 
-    if ($image_result && mysqli_num_rows($image_result) > 0) {
+    if ($image_id > 0) {
 
-        $image_data = mysqli_fetch_assoc($image_result);
+        try {
 
-        $image_path = "../uploads/products/" . $image_data['image_name'];
+            /* GET IMAGE */
+
+            $get_image_sql = "
+                SELECT
+                    image_name
+                FROM product_images
+                WHERE image_id = :image_id
+                  AND product_id = :product_id
+                LIMIT 1
+            ";
+
+            $get_image_stmt =
+                $conn->prepare(
+                    $get_image_sql
+                );
+
+            $get_image_stmt->execute([
+
+                ':image_id' =>
+                $image_id,
+
+                ':product_id' =>
+                $product_id
+
+            ]);
 
 
-        /* DELETE FILE */
+            $image_data =
+                $get_image_stmt->fetch(
+                    PDO::FETCH_ASSOC
+                );
 
-        if (file_exists($image_path)) {
 
-            unlink($image_path);
+            /* DELETE FILE */
+
+            if (
+                $image_data &&
+                !empty($image_data['image_name'])
+            ) {
+
+                $image_name =
+                    basename(
+                        $image_data['image_name']
+                    );
+
+                $image_path =
+                    $upload_dir .
+                    $image_name;
+
+
+                if (
+                    file_exists(
+                        $image_path
+                    )
+                ) {
+
+                    unlink(
+                        $image_path
+                    );
+                }
+            }
+
+
+            /* DELETE DATABASE RECORD */
+
+            $delete_image_sql = "
+                DELETE FROM product_images
+                WHERE image_id = :image_id
+                  AND product_id = :product_id
+            ";
+
+            $delete_image_stmt =
+                $conn->prepare(
+                    $delete_image_sql
+                );
+
+            $delete_image_stmt->execute([
+
+                ':image_id' =>
+                $image_id,
+
+                ':product_id' =>
+                $product_id
+
+            ]);
+
+
+            $success =
+                "Image deleted successfully.";
+        } catch (PDOException $e) {
+
+            $error =
+                "Unable to delete image: " .
+                $e->getMessage();
         }
-
-
-        /* DELETE DATABASE RECORD */
-
-        $delete_sql = "
-            DELETE FROM product_images
-            WHERE image_id = $image_id
-            AND product_id = $product_id
-        ";
-
-        mysqli_query($conn, $delete_sql);
     }
-
-
-    header(
-        "Location: product_images.php?product_id=" . $product_id
-    );
-
-    exit;
 }
 
 
 /* =========================================================
-   ADD MULTIPLE IMAGES
+   UPLOAD MULTIPLE IMAGES
 ========================================================= */
 
-$message = "";
-$message_type = "";
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_FILES['product_images'])
+) {
+
+    $allowed_extensions = [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp'
+    ];
+
+    $max_file_size =
+        5 * 1024 * 1024;
 
 
-if (isset($_POST['upload_images'])) {
+    $uploaded_count = 0;
 
 
-    if (
-        !isset($_FILES['product_images']) ||
-        empty($_FILES['product_images']['name'][0])
+    $file_names =
+        $_FILES['product_images']['name'];
+
+    $file_tmp_names =
+        $_FILES['product_images']['tmp_name'];
+
+    $file_sizes =
+        $_FILES['product_images']['size'];
+
+    $file_errors =
+        $_FILES['product_images']['error'];
+
+
+    foreach (
+        $file_names as $key => $original_name
     ) {
 
-        $message = "Please select at least one image.";
-        $message_type = "danger";
-    } else {
+        if (
+            $file_errors[$key]
+            !== UPLOAD_ERR_OK
+        ) {
 
-
-        $upload_folder = "../uploads/products/";
-
-
-        /* CREATE FOLDER */
-
-        if (!is_dir($upload_folder)) {
-
-            mkdir(
-                $upload_folder,
-                0777,
-                true
-            );
+            continue;
         }
 
 
-        $allowed_extensions = array(
-            "jpg",
-            "jpeg",
-            "png",
-            "webp"
-        );
+        $tmp_name =
+            $file_tmp_names[$key];
+
+        $file_size =
+            (int)$file_sizes[$key];
 
 
-        $total_images =
-            count($_FILES['product_images']['name']);
+        $extension =
+            strtolower(
+                pathinfo(
+                    $original_name,
+                    PATHINFO_EXTENSION
+                )
+            );
 
 
-        $success_count = 0;
+        /* CHECK EXTENSION */
 
-
-        for (
-            $i = 0;
-            $i < $total_images;
-            $i++
+        if (
+            !in_array(
+                $extension,
+                $allowed_extensions,
+                true
+            )
         ) {
 
+            $error =
+                "Only JPG, JPEG, PNG, GIF and WEBP images are allowed.";
 
-            /* CHECK ERROR */
-
-            if (
-                $_FILES['product_images']['error'][$i]
-                != UPLOAD_ERR_OK
-            ) {
-
-                continue;
-            }
+            continue;
+        }
 
 
-            $original_name =
-                $_FILES['product_images']['name'][$i];
+        /* CHECK SIZE */
+
+        if (
+            $file_size >
+            $max_file_size
+        ) {
+
+            $error =
+                "Image size must be less than 5 MB.";
+
+            continue;
+        }
 
 
-            $tmp_name =
-                $_FILES['product_images']['tmp_name'][$i];
+        /* UNIQUE FILE NAME */
+
+        $new_image_name =
+            "product_" .
+            $product_id .
+            "_" .
+            time() .
+            "_" .
+            uniqid() .
+            "." .
+            $extension;
 
 
-            $extension =
-                strtolower(
-                    pathinfo(
-                        $original_name,
-                        PATHINFO_EXTENSION
-                    )
-                );
+        $destination =
+            $upload_dir .
+            $new_image_name;
 
 
-            /* CHECK EXTENSION */
+        /* MOVE FILE */
 
-            if (
-                !in_array(
-                    $extension,
-                    $allowed_extensions
-                )
-            ) {
+        if (
+            move_uploaded_file(
+                $tmp_name,
+                $destination
+            )
+        ) {
 
-                continue;
-            }
+            try {
 
-
-            /* UNIQUE FILE NAME */
-
-            $new_name =
-                time()
-                . "_"
-                . uniqid()
-                . "."
-                . $extension;
-
-
-            $destination =
-                $upload_folder
-                . $new_name;
-
-
-            /* MOVE IMAGE */
-
-            if (
-                move_uploaded_file(
-                    $tmp_name,
-                    $destination
-                )
-            ) {
-
-
-                /* INSERT DATABASE */
-
-                $image_name =
-                    mysqli_real_escape_string(
-                        $conn,
-                        $new_name
-                    );
-
-
-                $insert_sql = "
+                $insert_image_sql = "
                     INSERT INTO product_images
                     (
                         product_id,
                         image_name,
-                        status
+                        created_at
                     )
                     VALUES
                     (
-                        '$product_id',
-                        '$image_name',
-                        1
+                        :product_id,
+                        :image_name,
+                        CURRENT_TIMESTAMP
                     )
                 ";
 
 
+                $insert_image_stmt =
+                    $conn->prepare(
+                        $insert_image_sql
+                    );
+
+
+                $insert_image_stmt->execute([
+
+                    ':product_id' =>
+                    $product_id,
+
+                    ':image_name' =>
+                    $new_image_name
+
+                ]);
+
+
+                $uploaded_count++;
+            } catch (PDOException $e) {
+
                 if (
-                    mysqli_query(
-                        $conn,
-                        $insert_sql
+                    file_exists(
+                        $destination
                     )
                 ) {
 
-                    $success_count++;
-                } else {
-
-                    /* REMOVE FILE IF DB INSERT FAILS */
-
-                    if (
-                        file_exists($destination)
-                    ) {
-
-                        unlink($destination);
-                    }
+                    unlink(
+                        $destination
+                    );
                 }
+
+
+                $error =
+                    "Database error while saving image: " .
+                    $e->getMessage();
             }
         }
+    }
 
 
-        if ($success_count > 0) {
+    if ($uploaded_count > 0) {
 
-            $message =
-                $success_count
-                . " image(s) uploaded successfully.";
-
-            $message_type = "success";
-        } else {
-
-            $message =
-                "No image was uploaded. Please select valid JPG, JPEG, PNG or WEBP files.";
-
-            $message_type = "danger";
-        }
+        $success =
+            $uploaded_count .
+            " product image(s) uploaded successfully.";
     }
 }
 
@@ -294,18 +846,32 @@ if (isset($_POST['upload_images'])) {
 $images_sql = "
     SELECT
         image_id,
+        product_id,
         image_name,
-        status,
         created_at
     FROM product_images
-    WHERE product_id = $product_id
+    WHERE product_id = :product_id
     ORDER BY image_id DESC
 ";
 
-$images_result =
-    mysqli_query(
-        $conn,
+
+$images_stmt =
+    $conn->prepare(
         $images_sql
+    );
+
+
+$images_stmt->execute([
+
+    ':product_id' =>
+    $product_id
+
+]);
+
+
+$images =
+    $images_stmt->fetchAll(
+        PDO::FETCH_ASSOC
     );
 
 ?>
@@ -326,8 +892,14 @@ $images_result =
         name="viewport"
         content="width=device-width, initial-scale=1">
 
-
-    <title>Product Images</title>
+    <title>
+        Product Images -
+        <?php
+        echo htmlspecialchars(
+            $product['product_name']
+        );
+        ?>
+    </title>
 
 
     <!-- Bootstrap -->
@@ -359,42 +931,101 @@ $images_result =
 
 
     <style>
-        .image-card {
+        .product-info-table td {
+            vertical-align: middle;
+        }
 
-            border: 1px solid #ddd;
 
-            border-radius: 6px;
+        .product-info-table td:first-child {
+            width: 180px;
+            font-weight: bold;
+        }
 
-            padding: 10px;
 
+        .upload-box {
+            border: 2px dashed #ddd;
+            padding: 30px;
+            text-align: center;
+            background: #fafafa;
             margin-bottom: 20px;
-
-            background: #fff;
-
         }
 
 
-        .product-image {
+        .upload-box i {
+            font-size: 40px;
+            color: #999;
+            margin-bottom: 15px;
+        }
 
-            width: 100%;
 
-            height: 180px;
-
-            object-fit: cover;
-
+        .image-card {
+            border: 1px solid #ddd;
             border-radius: 5px;
-
+            background: #fff;
+            padding: 10px;
+            margin-bottom: 20px;
         }
 
 
-        .image-name {
+        .image-box {
+            width: 100%;
+            height: 190px;
+            overflow: hidden;
+            background: #f5f5f5;
+            border-radius: 4px;
 
-            margin-top: 10px;
+            display: flex;
 
-            word-break: break-all;
+            align-items: center;
 
-            font-size: 13px;
+            justify-content: center;
+        }
 
+
+        .image-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+
+        .image-details {
+            padding-top: 10px;
+        }
+
+
+        .image-details p {
+            margin-bottom: 8px;
+        }
+
+
+        .empty-gallery {
+            text-align: center;
+            padding: 50px 20px;
+        }
+
+
+        .empty-gallery i {
+            font-size: 50px;
+            color: #ccc;
+            margin-bottom: 15px;
+        }
+
+
+        .product-name-heading {
+            margin-top: 0;
+        }
+
+
+        .status-active {
+            color: #26B99A;
+            font-weight: bold;
+        }
+
+
+        .status-inactive {
+            color: #d9534f;
+            font-weight: bold;
         }
     </style>
 
@@ -406,28 +1037,28 @@ $images_result =
 
     <div class="container body">
 
-
         <div class="main_container">
 
 
             <!-- =====================================================
-         SIDEBAR
-    ====================================================== -->
+             SIDEBAR
+        ====================================================== -->
 
             <?php include "sidebar.php"; ?>
 
 
             <!-- =====================================================
-         RIGHT CONTENT
-    ====================================================== -->
+             RIGHT CONTENT
+        ====================================================== -->
 
-            <div class="right_col"
+            <div
+                class="right_col"
                 role="main">
 
 
                 <!-- =================================================
-             TOP NAVIGATION
-        ================================================== -->
+                 TOP NAVIGATION
+            ================================================== -->
 
                 <div class="top_nav">
 
@@ -447,24 +1078,39 @@ $images_result =
                             </div>
 
 
-                            <ul class="nav navbar-nav navbar-right">
+                            <ul
+                                class="nav navbar-nav navbar-right">
+
+
+                                <!-- USER PROFILE -->
 
                                 <li>
 
                                     <a
                                         href="javascript:;"
                                         class="user-profile dropdown-toggle"
-                                        data-toggle="dropdown">
+                                        data-toggle="dropdown"
+                                        aria-expanded="false">
+
 
                                         <img
                                             src="assets/images/img.jpg"
-                                            alt="">
+                                            alt="Profile">
 
-                                        John Doe
+
+                                        <?php
+
+                                        echo htmlspecialchars(
+                                            $admin['name']
+                                        );
+
+                                        ?>
+
 
                                         <span
                                             class="fa fa-angle-down">
                                         </span>
+
 
                                     </a>
 
@@ -475,7 +1121,12 @@ $images_result =
 
                                         <li>
 
-                                            <a href="javascript:;">
+                                            <a
+                                                href="javascript:;">
+
+                                                <i
+                                                    class="fa fa-user pull-right">
+                                                </i>
 
                                                 Profile
 
@@ -486,7 +1137,12 @@ $images_result =
 
                                         <li>
 
-                                            <a href="javascript:;">
+                                            <a
+                                                href="javascript:;">
+
+                                                <i
+                                                    class="fa fa-cog pull-right">
+                                                </i>
 
                                                 Settings
 
@@ -497,7 +1153,12 @@ $images_result =
 
                                         <li>
 
-                                            <a href="javascript:;">
+                                            <a
+                                                href="javascript:;">
+
+                                                <i
+                                                    class="fa fa-question-circle pull-right">
+                                                </i>
 
                                                 Help
 
@@ -508,7 +1169,8 @@ $images_result =
 
                                         <li>
 
-                                            <a href="login.php">
+                                            <a
+                                                href="../logout.php">
 
                                                 <i
                                                     class="fa fa-sign-out pull-right">
@@ -525,7 +1187,118 @@ $images_result =
 
                                 </li>
 
+
+                                <!-- MESSAGE -->
+
+                                <li
+                                    role="presentation"
+                                    class="dropdown">
+
+
+                                    <a
+                                        href="javascript:;"
+                                        class="dropdown-toggle info-number"
+                                        data-toggle="dropdown"
+                                        aria-expanded="false">
+
+
+                                        <i
+                                            class="fa fa-envelope-o">
+                                        </i>
+
+
+                                        <span
+                                            class="badge bg-green">
+
+                                            6
+
+                                        </span>
+
+
+                                    </a>
+
+
+                                    <ul
+                                        class="dropdown-menu list-unstyled msg_list"
+                                        role="menu">
+
+
+                                        <li>
+
+                                            <a>
+
+
+                                                <span class="image">
+
+                                                    <img
+                                                        src="assets/images/img.jpg"
+                                                        alt="Profile">
+
+                                                </span>
+
+
+                                                <span>
+
+                                                    <span>
+
+                                                        Admin
+
+                                                    </span>
+
+
+                                                    <span class="time">
+
+                                                        3 mins ago
+
+                                                    </span>
+
+                                                </span>
+
+
+                                                <span class="message">
+
+                                                    Welcome to admin dashboard.
+
+                                                </span>
+
+
+                                            </a>
+
+                                        </li>
+
+
+                                        <li>
+
+                                            <div class="text-center">
+
+                                                <a>
+
+                                                    <strong>
+
+                                                        See All Alerts
+
+                                                    </strong>
+
+
+                                                    <i
+                                                        class="fa fa-angle-right">
+                                                    </i>
+
+                                                </a>
+
+                                            </div>
+
+                                        </li>
+
+
+                                    </ul>
+
+
+                                </li>
+
+
                             </ul>
+
 
                         </nav>
 
@@ -535,88 +1308,140 @@ $images_result =
 
 
                 <!-- =================================================
-             PAGE CONTENT
-        ================================================== -->
-
+                 PAGE CONTENT
+            ================================================== -->
 
                 <div class="container-fluid">
 
 
                     <!-- PAGE HEADER -->
 
-                    <div class="row">
-
-                        <div class="col-md-12">
-
-                            <div class="page-title">
-
-                                <div class="title_left">
-
-                                    <h3>
-
-                                        Product Images
-
-                                    </h3>
-
-                                    <p class="text-muted">
-
-                                        Manage images for
-                                        <strong>
-
-                                            <?php
-                                            echo htmlspecialchars(
-                                                $product['product_name']
-                                            );
-                                            ?>
-
-                                        </strong>
-
-                                    </p>
-
-                                </div>
+                    <div
+                        class="row"
+                        style="margin-bottom:20px;">
 
 
-                                <div class="title_right">
+                        <div class="col-md-8">
 
-                                    <a
-                                        href="products.php"
-                                        class="btn btn-default">
 
-                                        <i class="fa fa-arrow-left"></i>
+                            <h3 class="product-name-heading">
 
-                                        Back to Products
+                                <i class="fa fa-picture-o"></i>
 
-                                    </a>
+                                Product Images
 
-                                </div>
+                            </h3>
 
-                            </div>
+
+                            <p class="text-muted">
+
+                                Manage images for:
+
+                                <strong>
+
+                                    <?php
+
+                                    echo htmlspecialchars(
+                                        $product['product_name']
+                                    );
+
+                                    ?>
+
+                                </strong>
+
+                            </p>
+
 
                         </div>
+
+
+                        <div class="col-md-4 text-right">
+
+
+                            <a
+                                href="products.php"
+                                class="btn btn-default">
+
+
+                                <i class="fa fa-arrow-left"></i>
+
+                                Back to Products
+
+
+                            </a>
+
+
+                        </div>
+
 
                     </div>
 
 
                     <!-- =================================================
-                 MESSAGE
-            ================================================== -->
+                     ALERTS
+                ================================================== -->
 
-                    <?php if ($message != "") { ?>
 
-                        <div class="alert alert-<?php echo $message_type; ?>">
+                    <?php if (!empty($success)) { ?>
+
+                        <div
+                            class="alert alert-success alert-dismissible">
+
 
                             <button
                                 type="button"
                                 class="close"
                                 data-dismiss="alert">
 
-                                ×
+                                &times;
 
                             </button>
 
+
+                            <i class="fa fa-check-circle"></i>
+
+
                             <?php
-                            echo htmlspecialchars($message);
+
+                            echo htmlspecialchars(
+                                $success
+                            );
+
                             ?>
+
+
+                        </div>
+
+                    <?php } ?>
+
+
+                    <?php if (!empty($error)) { ?>
+
+                        <div
+                            class="alert alert-danger alert-dismissible">
+
+
+                            <button
+                                type="button"
+                                class="close"
+                                data-dismiss="alert">
+
+                                &times;
+
+                            </button>
+
+
+                            <i class="fa fa-exclamation-circle"></i>
+
+
+                            <?php
+
+                            echo htmlspecialchars(
+                                $error
+                            );
+
+                            ?>
+
 
                         </div>
 
@@ -624,287 +1449,621 @@ $images_result =
 
 
                     <!-- =================================================
-                 ADD IMAGES
-            ================================================== -->
+                     PRODUCT INFORMATION
+                ================================================== -->
 
-                    <div class="row">
-
-                        <div class="col-md-12">
+                    <div class="x_panel">
 
 
-                            <div class="x_panel">
+                        <div class="x_title">
 
 
-                                <div class="x_title">
+                            <h2>
 
-                                    <h2>
+                                Product Information
 
-                                        Add Product Images
-
-                                        <small>
-
-                                            You can select multiple images
-
-                                        </small>
-
-                                    </h2>
-
-                                    <div class="clearfix"></div>
-
-                                </div>
+                            </h2>
 
 
-                                <div class="x_content">
+                            <div class="clearfix"></div>
 
 
-                                    <form
-                                        method="POST"
-                                        enctype="multipart/form-data">
+                        </div>
 
 
-                                        <input
-                                            type="hidden"
-                                            name="product_id"
-                                            value="<?php echo $product_id; ?>">
+                        <div class="x_content">
 
 
-                                        <div class="form-group">
+                            <div class="table-responsive">
 
 
-                                            <label>
-
-                                                Select Product Images
-
-                                                <span
-                                                    class="text-danger">
-                                                    *
-                                                </span>
-
-                                            </label>
+                                <table
+                                    class="table table-bordered product-info-table">
 
 
-                                            <input
-                                                type="file"
-                                                name="product_images[]"
-                                                class="form-control"
-                                                accept=".jpg,.jpeg,.png,.webp"
-                                                multiple
-                                                required>
+                                    <tbody>
 
 
-                                            <small
-                                                class="text-muted">
+                                        <tr>
 
-                                                You can select multiple
-                                                JPG, JPEG, PNG or WEBP images.
+                                            <td>
+                                                Product ID
+                                            </td>
 
-                                            </small>
+                                            <td>
 
+                                                <?php
 
-                                        </div>
+                                                echo htmlspecialchars(
+                                                    $product['product_id']
+                                                );
 
+                                                ?>
 
-                                        <br>
+                                            </td>
 
-
-                                        <button
-                                            type="submit"
-                                            name="upload_images"
-                                            value="1"
-                                            class="btn btn-primary">
-
-
-                                            <i class="fa fa-upload"></i>
-
-                                            Upload Images
+                                        </tr>
 
 
-                                        </button>
+                                        <tr>
+
+                                            <td>
+                                                Product Code
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['product_code']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
 
 
-                                    </form>
+                                        <tr>
+
+                                            <td>
+                                                Product Name
+                                            </td>
+
+                                            <td>
+
+                                                <strong>
+
+                                                    <?php
+
+                                                    echo htmlspecialchars(
+                                                        $product['product_name']
+                                                    );
+
+                                                    ?>
+
+                                                </strong>
+
+                                            </td>
+
+                                        </tr>
 
 
-                                </div>
+                                        <tr>
+
+                                            <td>
+                                                Category
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['category_name']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Subcategory
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['subcategory_name']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Brand
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['brand_name']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Color
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['color']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Size
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['size']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Material
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['material']
+                                                        ?: 'N/A'
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Stock
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                echo htmlspecialchars(
+                                                    $product['stock_quantity']
+                                                );
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                        <tr>
+
+                                            <td>
+                                                Status
+                                            </td>
+
+                                            <td>
+
+                                                <?php
+
+                                                if (
+                                                    (int)$product['status'] === 1
+                                                ) {
+
+                                                ?>
+
+                                                    <span
+                                                        class="status-active">
+
+                                                        Active
+
+                                                    </span>
+
+                                                <?php
+
+                                                } else {
+
+                                                ?>
+
+                                                    <span
+                                                        class="status-inactive">
+
+                                                        Inactive
+
+                                                    </span>
+
+                                                <?php
+
+                                                }
+
+                                                ?>
+
+                                            </td>
+
+                                        </tr>
+
+
+                                    </tbody>
+
+
+                                </table>
+
 
                             </div>
 
+
                         </div>
+
 
                     </div>
 
 
                     <!-- =================================================
-                 IMAGE LIST
-            ================================================== -->
+                     UPLOAD IMAGES
+                ================================================== -->
 
-                    <div class="row">
-
-                        <div class="col-md-12">
+                    <div class="x_panel">
 
 
-                            <div class="x_panel">
+                        <div class="x_title">
 
 
-                                <div class="x_title">
+                            <h2>
 
-                                    <h2>
+                                Upload Product Images
 
-                                        Product Image List
-
-                                        <small>
-
-                                            <?php
-                                            echo htmlspecialchars(
-                                                $product['product_name']
-                                            );
-                                            ?>
-
-                                        </small>
-
-                                    </h2>
+                            </h2>
 
 
-                                    <div class="clearfix"></div>
+                            <div class="clearfix"></div>
+
+
+                        </div>
+
+
+                        <div class="x_content">
+
+
+                            <form
+                                method="POST"
+                                enctype="multipart/form-data">
+
+
+                                <div class="upload-box">
+
+
+                                    <i
+                                        class="fa fa-cloud-upload">
+                                    </i>
+
+
+                                    <h4>
+
+                                        Select Product Images
+
+                                    </h4>
+
+
+                                    <p class="text-muted">
+
+                                        You can select multiple images.
+
+                                        <br>
+
+                                        JPG, JPEG, PNG, GIF and WEBP
+
+                                        <br>
+
+                                        Maximum size: 5 MB per image.
+
+                                    </p>
+
+
+                                    <br>
+
+
+                                    <input
+                                        type="file"
+                                        name="product_images[]"
+                                        class="form-control"
+                                        multiple
+                                        accept=".jpg,.jpeg,.png,.gif,.webp"
+                                        required>
+
+
+                                    <br>
+
+
+                                    <button
+                                        type="submit"
+                                        class="btn btn-primary">
+
+
+                                        <i class="fa fa-upload"></i>
+
+                                        Upload Images
+
+
+                                    </button>
+
 
                                 </div>
 
 
-                                <div class="x_content">
+                            </form>
 
 
-                                    <div class="row">
+                        </div>
 
 
-                                        <?php
-
-                                        if (
-                                            $images_result
-                                            &&
-                                            mysqli_num_rows(
-                                                $images_result
-                                            ) > 0
-                                        ) {
+                    </div>
 
 
-                                            while (
-                                                $image =
-                                                mysqli_fetch_assoc(
-                                                    $images_result
-                                                )
-                                            ) {
+                    <!-- =================================================
+                     PRODUCT IMAGE GALLERY
+                ================================================== -->
 
-                                        ?>
+                    <div class="x_panel">
 
+
+                        <div class="x_title">
+
+
+                            <h2>
+
+                                Product Image Gallery
+
+                                <small>
+
+                                    <?php
+
+                                    echo count($images);
+
+                                    ?>
+
+                                    Images
+
+                                </small>
+
+                            </h2>
+
+
+                            <div class="clearfix"></div>
+
+
+                        </div>
+
+
+                        <div class="x_content">
+
+
+                            <?php if (!empty($images)) { ?>
+
+
+                                <div class="row">
+
+
+                                    <?php foreach (
+                                        $images as $image
+                                    ) { ?>
+
+
+                                        <div
+                                            class="col-md-3 col-sm-4 col-xs-12">
+
+
+                                            <div
+                                                class="image-card">
+
+
+                                                <!-- IMAGE -->
 
                                                 <div
-                                                    class="col-md-3 col-sm-4 col-xs-6">
+                                                    class="image-box">
 
 
-                                                    <div
-                                                        class="image-card">
+                                                    <img
+                                                        src="../uploads/products/<?php
+                                                                                    echo htmlspecialchars(
+                                                                                        basename(
+                                                                                            $image['image_name']
+                                                                                        )
+                                                                                    );
+                                                                                    ?>"
+                                                        alt="Product Image">
 
 
-                                                        <img
-                                                            src="../uploads/products/<?php echo htmlspecialchars($image['image_name']); ?>"
-                                                            class="product-image"
-                                                            alt="Product Image">
+                                                </div>
 
 
-                                                        <div
-                                                            class="image-name">
+                                                <!-- IMAGE DETAILS -->
 
-                                                            <?php
-                                                            echo htmlspecialchars(
-                                                                $image['image_name']
+                                                <div
+                                                    class="image-details">
+
+
+                                                    <p>
+
+                                                        <strong>
+                                                            Image ID:
+                                                        </strong>
+
+                                                        <?php
+
+                                                        echo htmlspecialchars(
+                                                            $image['image_id']
+                                                        );
+
+                                                        ?>
+
+                                                    </p>
+
+
+                                                    <p
+                                                        class="text-muted">
+
+                                                        <?php
+
+                                                        if (
+                                                            !empty($image['created_at'])
+                                                        ) {
+
+                                                            echo date(
+                                                                "d M Y, h:i A",
+                                                                strtotime(
+                                                                    $image['created_at']
+                                                                )
                                                             );
-                                                            ?>
+                                                        } else {
 
-                                                        </div>
+                                                            echo "N/A";
+                                                        }
 
+                                                        ?>
 
-                                                        <div
-                                                            class="text-muted">
-
-                                                            <small>
-
-                                                                <?php
-                                                                echo date(
-                                                                    "d-m-Y",
-                                                                    strtotime(
-                                                                        $image['created_at']
-                                                                    )
-                                                                );
-                                                                ?>
-
-                                                            </small>
-
-                                                        </div>
+                                                    </p>
 
 
-                                                        <br>
+                                                    <!-- DELETE -->
+
+                                                    <a
+                                                        href="product_images.php?product_id=<?php
+                                                                                            echo (int)$product_id;
+                                                                                            ?>&delete_image=<?php
+                                                                    echo (int)$image['image_id'];
+                                                                    ?>"
+                                                        class="btn btn-danger btn-sm btn-block"
+                                                        onclick="return confirm('Are you sure you want to delete this image?');">
 
 
-                                                        <a
-                                                            href="product_images.php?product_id=<?php echo $product_id; ?>&delete=<?php echo $image['image_id']; ?>"
-                                                            class="btn btn-sm btn-danger"
-                                                            onclick="return confirm('Are you sure you want to delete this image?');">
+                                                        <i
+                                                            class="fa fa-trash">
+                                                        </i>
 
-                                                            <i
-                                                                class="fa fa-trash">
-                                                            </i>
-
-                                                            Delete
-
-                                                        </a>
+                                                        Delete Image
 
 
-                                                    </div>
+                                                    </a>
 
 
                                                 </div>
 
-
-                                            <?php
-
-                                            }
-                                        } else {
-
-                                            ?>
-
-
-                                            <div class="col-md-12">
-
-                                                <div
-                                                    class="alert alert-info">
-
-                                                    <i
-                                                        class="fa fa-info-circle">
-                                                    </i>
-
-                                                    No images added for this
-                                                    product yet.
-
-                                                </div>
 
                                             </div>
 
 
-                                        <?php
-
-                                        }
-
-                                        ?>
+                                        </div>
 
 
-                                    </div>
+                                    <?php } ?>
 
 
                                 </div>
 
-                            </div>
+
+                            <?php } else { ?>
+
+
+                                <div
+                                    class="empty-gallery">
+
+
+                                    <i
+                                        class="fa fa-picture-o">
+                                    </i>
+
+
+                                    <h4>
+
+                                        No Product Images Found
+
+                                    </h4>
+
+
+                                    <p class="text-muted">
+
+                                        Upload images using the form above.
+
+                                    </p>
+
+
+                                </div>
+
+
+                            <?php } ?>
+
 
                         </div>
+
 
                     </div>
 
@@ -913,18 +2072,21 @@ $images_result =
 
 
                 <!-- =================================================
-             FOOTER
-        ================================================== -->
+                 FOOTER
+            ================================================== -->
 
                 <footer>
 
+
                     <div class="pull-right">
 
-                        Gentelella - Bootstrap Admin Template
+                        Product Management Admin Panel
 
                     </div>
 
+
                     <div class="clearfix"></div>
+
 
                 </footer>
 
@@ -936,9 +2098,9 @@ $images_result =
     </div>
 
 
-    <!-- =====================================================
+    <!-- =========================================================
      JAVASCRIPT
-====================================================== -->
+========================================================= -->
 
 
     <script

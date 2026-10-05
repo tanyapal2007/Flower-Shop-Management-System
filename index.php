@@ -1,3 +1,57 @@
+<?php
+
+require_once "config/database.php";
+
+/* =========================================================
+   FETCH ANY 8 ACTIVE PRODUCTS
+========================================================= */
+
+$sql = "
+    SELECT
+        p.product_id,
+        p.product_name,
+        p.product_description,
+
+        pp.selling_price,
+
+        pi.image_name
+
+    FROM products p
+
+    LEFT JOIN LATERAL
+    (
+        SELECT
+            product_prices.selling_price
+        FROM product_prices
+        WHERE product_prices.product_id = p.product_id
+        ORDER BY product_prices.price_id DESC
+        LIMIT 1
+    ) pp ON TRUE
+
+    LEFT JOIN LATERAL
+    (
+        SELECT
+            product_images.image_name
+        FROM product_images
+        WHERE product_images.product_id = p.product_id
+        ORDER BY product_images.image_id DESC
+        LIMIT 1
+    ) pi ON TRUE
+
+    WHERE p.status = 1
+
+    ORDER BY RANDOM()
+
+    LIMIT 8
+";
+
+$stmt = $conn->prepare($sql);
+$stmt->execute();
+
+$gallery_products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+?>
+
 <!DOCTYPE html>
 <html>
 
@@ -178,7 +232,9 @@
 
   <!-- end why section -->
 
-  ```php
+
+
+
   <!-- gallery section -->
   <section class="gallery_section layout_padding">
 
@@ -194,92 +250,88 @@
 
       <div class="gallery_grid">
 
-        <!-- Product 1 -->
-        <div class="gallery_item">
-          <img src="images/g-1.jpg" alt="Elegant Dress">
+        <?php if (!empty($gallery_products)) { ?>
 
-          <div class="product_info">
-            <h5>Elegant Dress</h5>
-            <p>₹1,499</p>
+          <?php foreach ($gallery_products as $product) { ?>
+
+            <?php
+
+            /* =====================================================
+             PRODUCT IMAGE
+          ===================================================== */
+
+            if (!empty($product['image_name'])) {
+
+              $image_path =
+                "uploads/products/" .
+                basename($product['image_name']);
+            } else {
+
+              $image_path =
+                "images/no-image.jpg";
+            }
+
+
+            /* =====================================================
+             PRODUCT PRICE
+          ===================================================== */
+
+            $price = $product['selling_price'] ?? 0;
+
+            ?>
+
+            <div class="gallery_item">
+
+              <!-- PRODUCT IMAGE -->
+              <img
+                src="<?php echo htmlspecialchars($image_path); ?>"
+                alt="<?php echo htmlspecialchars($product['product_name']); ?>">
+
+              <!-- PRODUCT INFORMATION -->
+              <div class="product_info">
+
+                <h5>
+                  <?php
+                  echo htmlspecialchars(
+                    $product['product_name']
+                  );
+                  ?>
+                </h5>
+
+                <p>
+                  ₹<?php
+                    echo number_format(
+                      (float)$price,
+                      2
+                    );
+                    ?>
+                </p>
+
+                <!-- ADD TO CART BUTTON -->
+                <button
+                  type="button"
+                  class="add-to-cart"
+                  data-product-id="<?php echo (int)$product['product_id']; ?>">
+                  Add to Cart
+                </button>
+
+              </div>
+
+            </div>
+
+          <?php } ?>
+
+        <?php } else { ?>
+
+          <div class="col-12 text-center">
+
+            <p>
+              No products available.
+            </p>
+
           </div>
-        </div>
 
-
-        <!-- Product 2 -->
-        <div class="gallery_item">
-          <img src="images/g-2.jpg" alt="Casual Wear">
-
-          <div class="product_info">
-            <h5>Casual Wear</h5>
-            <p>₹1,199</p>
-          </div>
-        </div>
-
-
-        <!-- Product 3 -->
-        <div class="gallery_item">
-          <img src="images/g-3.jpg" alt="Beautiful Kurti">
-
-          <div class="product_info">
-            <h5>Beautiful Kurti</h5>
-            <p>₹1,299</p>
-          </div>
-        </div>
-
-
-        <!-- Product 4 -->
-        <div class="gallery_item">
-          <img src="images/g-4.jpg" alt="Stylish Top">
-
-          <div class="product_info">
-            <h5>Stylish Top</h5>
-            <p>₹899</p>
-          </div>
-        </div>
-
-
-        <!-- Product 5 -->
-        <div class="gallery_item">
-          <img src="images/g-5.jpg" alt="Fashion Shirt">
-
-          <div class="product_info">
-            <h5>Fashion Shirt</h5>
-            <p>₹999</p>
-          </div>
-        </div>
-
-
-        <!-- Product 6 -->
-        <div class="gallery_item">
-          <img src="images/g-6.jpg" alt="Trendy Collection">
-
-          <div class="product_info">
-            <h5>Trendy Collection</h5>
-            <p>₹1,599</p>
-          </div>
-        </div>
-
-
-        <!-- Product 7 -->
-        <div class="gallery_item">
-          <img src="images/g-7.jpg" alt="Designer Outfit">
-
-          <div class="product_info">
-            <h5>Designer Outfit</h5>
-            <p>₹1,799</p>
-          </div>
-        </div>
-
-
-        <!-- Product 8 -->
-        <div class="gallery_item">
-          <img src="images/g-8.jpg" alt="Latest Collection">
-
-          <div class="product_info">
-            <h5>Latest Collection</h5>
-            <p>₹1,899</p>
-          </div>
-        </div>
+        <?php } ?>
 
       </div>
 
@@ -287,6 +339,100 @@
 
   </section>
   <!-- end gallery section -->
+
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+
+      const buttons = document.querySelectorAll(".add-to-cart");
+
+      buttons.forEach(function(button) {
+
+        button.addEventListener("click", function() {
+
+          const productId = this.getAttribute("data-product-id");
+
+          if (!productId) {
+            return;
+          }
+
+          /* Disable button while processing */
+          this.disabled = true;
+          this.innerText = "Adding...";
+
+          fetch(
+              "config/backend_cart.php?action=add&product_id=" + productId, {
+                method: "GET",
+                headers: {
+                  "X-Requested-With": "XMLHttpRequest"
+                }
+              }
+            )
+            .then(function(response) {
+              return response.json();
+            })
+            .then(function(data) {
+
+              /* =========================================
+                 LOGIN REQUIRED
+              ========================================= */
+
+              if (data.login_required) {
+
+                window.location.href = "login.php";
+
+                return;
+              }
+
+
+              /* =========================================
+                 PRODUCT ADDED
+              ========================================= */
+
+              if (
+                data.success ||
+                data.status === "success"
+              ) {
+
+                window.location.href = "cart.php";
+
+                return;
+              }
+
+
+              /* =========================================
+                 ERROR
+              ========================================= */
+
+              alert(
+                data.message ||
+                "Something went wrong while adding product to cart."
+              );
+
+              button.disabled = false;
+              button.innerText = "Add to Cart";
+
+            })
+            .catch(function(error) {
+
+              console.error(error);
+
+              alert(
+                "Something went wrong while adding product to cart."
+              );
+
+              button.disabled = false;
+              button.innerText = "Add to Cart";
+
+            });
+
+        });
+
+      });
+
+    });
+  </script>
+
 
 
 

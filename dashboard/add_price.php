@@ -1,5 +1,61 @@
 <?php
-include "../config/database.php";
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   ADMIN LOGIN CHECK
+========================================================= */
+
+$login_user_id = $_SESSION['user_id'] ?? 0;
+
+if (!$login_user_id) {
+    header("Location: ../login.php");
+    exit;
+}
+
+
+/* =========================================================
+   CHECK ADMIN
+========================================================= */
+
+$admin_stmt = $conn->prepare("
+    SELECT
+        user_id,
+        name,
+        phone,
+        role,
+        status,
+        created_at
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+");
+
+$admin_stmt->execute([
+    ':user_id' => $login_user_id
+]);
+
+$admin = $admin_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+if (
+    !$admin ||
+    $admin['role'] !== 'admin' ||
+    (int)$admin['status'] !== 1
+) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+/* =========================================================
+   VARIABLES
+========================================================= */
 
 $product_id = 0;
 $product = null;
@@ -10,33 +66,57 @@ $popup_title = "";
 $popup_icon = "";
 $redirect_page = "";
 
+
 /* =========================================================
    GET PRODUCT ID
 ========================================================= */
 
 if (isset($_GET['product_id'])) {
-    $product_id = intval($_GET['product_id']);
+
+    $product_id = (int)$_GET['product_id'];
 }
 
+
 if ($product_id <= 0) {
+
     die("Invalid Product ID.");
 }
+
 
 /* =========================================================
    GET PRODUCT DETAILS
 ========================================================= */
 
-$product_sql = "SELECT product_id, product_name
-                FROM products
-                WHERE product_id = '$product_id'";
+try {
 
-$product_result = mysqli_query($conn, $product_sql);
+    $product_sql = "
+        SELECT
+            product_id,
+            product_name
+        FROM products
+        WHERE product_id = :product_id
+        LIMIT 1
+    ";
 
-if (!$product_result || mysqli_num_rows($product_result) == 0) {
-    die("Product not found.");
+    $product_stmt = $conn->prepare($product_sql);
+
+    $product_stmt->execute([
+        ':product_id' => $product_id
+    ]);
+
+    $product = $product_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+    if (!$product) {
+
+        die("Product not found.");
+    }
+} catch (PDOException $e) {
+
+    die("Database Error: " .
+        htmlspecialchars($e->getMessage()));
 }
 
-$product = mysqli_fetch_assoc($product_result);
 
 /* =========================================================
    ADD PRODUCT PRICE
@@ -44,29 +124,42 @@ $product = mysqli_fetch_assoc($product_result);
 
 if (isset($_POST['add_price'])) {
 
+
+    /* =====================================================
+       GET FORM VALUES
+    ====================================================== */
+
     $original_price = isset($_POST['original_price'])
-        ? floatval($_POST['original_price'])
+        ? (float)$_POST['original_price']
         : 0;
 
-    $discount_percentage = isset($_POST['discount_percentage'])
-        ? floatval($_POST['discount_percentage'])
+
+    $discount_percentage = isset(
+        $_POST['discount_percentage']
+    )
+        ? (float)$_POST['discount_percentage']
         : 0;
+
 
     $selling_price = isset($_POST['selling_price'])
-        ? floatval($_POST['selling_price'])
+        ? (float)$_POST['selling_price']
         : 0;
 
-    $start_date = isset($_POST['start_date'])
-        ? mysqli_real_escape_string($conn, $_POST['start_date'])
-        : "";
 
-    $end_date = isset($_POST['end_date'])
-        ? mysqli_real_escape_string($conn, $_POST['end_date'])
-        : "";
+    $start_date = trim(
+        $_POST['start_date'] ?? ''
+    );
+
+
+    $end_date = trim(
+        $_POST['end_date'] ?? ''
+    );
+
 
     $status = isset($_POST['status'])
-        ? intval($_POST['status'])
+        ? (int)$_POST['status']
         : 1;
+
 
     /* =====================================================
        VALIDATION
@@ -74,124 +167,321 @@ if (isset($_POST['add_price'])) {
 
     if ($original_price <= 0) {
 
-        $popup_message = "Please enter a valid original price.";
-        $popup_type = "error";
-        $popup_title = "Invalid Price";
-        $popup_icon = "fa fa-times";
-    } elseif ($discount_percentage < 0 || $discount_percentage > 100) {
+        $popup_message =
+            "Please enter a valid original price.";
 
-        $popup_message = "Discount must be between 0 and 100.";
-        $popup_type = "error";
-        $popup_title = "Invalid Discount";
-        $popup_icon = "fa fa-times";
-    } elseif ($selling_price < 0) {
+        $popup_type =
+            "error";
 
-        $popup_message = "Please enter a valid selling price.";
-        $popup_type = "error";
-        $popup_title = "Invalid Selling Price";
-        $popup_icon = "fa fa-times";
+        $popup_title =
+            "Invalid Price";
+
+        $popup_icon =
+            "fa fa-times";
+    } elseif (
+        $discount_percentage < 0 ||
+        $discount_percentage > 100
+    ) {
+
+        $popup_message =
+            "Discount must be between 0 and 100.";
+
+        $popup_type =
+            "error";
+
+        $popup_title =
+            "Invalid Discount";
+
+        $popup_icon =
+            "fa fa-times";
+    } elseif ($selling_price <= 0) {
+
+        $popup_message =
+            "Please enter a valid selling price.";
+
+        $popup_type =
+            "error";
+
+        $popup_title =
+            "Invalid Selling Price";
+
+        $popup_icon =
+            "fa fa-times";
+    } elseif ($selling_price > $original_price) {
+
+        $popup_message =
+            "Selling price cannot be greater than original price.";
+
+        $popup_type =
+            "error";
+
+        $popup_title =
+            "Invalid Selling Price";
+
+        $popup_icon =
+            "fa fa-times";
+    } elseif (
+        $start_date !== '' &&
+        $end_date !== '' &&
+        $end_date < $start_date
+    ) {
+
+        $popup_message =
+            "End date cannot be earlier than start date.";
+
+        $popup_type =
+            "error";
+
+        $popup_title =
+            "Invalid Date";
+
+        $popup_icon =
+            "fa fa-times";
     } else {
 
-        /* =====================================================
-           INSERT PRICE
-        ====================================================== */
 
-        $sql = "INSERT INTO product_prices
-        (
-            product_id,
-            original_price,
-            discount_percentage,
-            selling_price,
-            start_date,
-            end_date,
-            status
-        )
-        VALUES
-        (
-            '$product_id',
-            '$original_price',
-            '$discount_percentage',
-            '$selling_price',
-            '$start_date',
-            '$end_date',
-            '$status'
-        )";
+        /* =================================================
+           DATABASE INSERT
+        ================================================== */
 
-        if (mysqli_query($conn, $sql)) {
+        try {
 
-            $popup_message = "Product price added successfully.";
-            $popup_type = "success";
-            $popup_title = "Price Added";
-            $popup_icon = "fa fa-check";
-            $redirect_page = "products.php";
-        } else {
 
-            $popup_message = mysqli_error($conn);
-            $popup_type = "error";
-            $popup_title = "Price Add Failed";
-            $popup_icon = "fa fa-times";
+            /* =============================================
+               CHECK PRODUCT EXISTS
+            ============================================== */
+
+            $check_product = $conn->prepare("
+                SELECT
+                    product_id
+                FROM products
+                WHERE product_id = :product_id
+                LIMIT 1
+            ");
+
+
+            $check_product->execute([
+                ':product_id' => $product_id
+            ]);
+
+
+            $product_exists =
+                $check_product->fetch(PDO::FETCH_ASSOC);
+
+
+            if (!$product_exists) {
+
+                throw new Exception(
+                    "Product does not exist."
+                );
+            }
+
+
+            /* =============================================
+               INSERT PRODUCT PRICE
+            ============================================== */
+
+            $sql = "
+                INSERT INTO product_prices
+                (
+                    product_id,
+                    original_price,
+                    discount_percentage,
+                    selling_price,
+                    start_date,
+                    end_date,
+                    status
+                )
+                VALUES
+                (
+                    :product_id,
+                    :original_price,
+                    :discount_percentage,
+                    :selling_price,
+                    :start_date,
+                    :end_date,
+                    :status
+                )
+                RETURNING price_id
+            ";
+
+
+            $stmt = $conn->prepare($sql);
+
+
+            $stmt->execute([
+                ':product_id' => $product_id,
+
+                ':original_price' =>
+                $original_price,
+
+                ':discount_percentage' =>
+                $discount_percentage,
+
+                ':selling_price' =>
+                $selling_price,
+
+                ':start_date' => (
+                    $start_date !== ''
+                    ? $start_date
+                    : null
+                ),
+
+                ':end_date' => (
+                    $end_date !== ''
+                    ? $end_date
+                    : null
+                ),
+
+                ':status' =>
+                $status
+            ]);
+
+
+            /* =============================================
+               GET INSERTED PRICE ID
+            ============================================== */
+
+            $price_id =
+                $stmt->fetchColumn();
+
+
+            /* =============================================
+               SUCCESS
+            ============================================== */
+
+            if ($price_id) {
+
+                $popup_message =
+                    "Product price added successfully.";
+
+                $popup_type =
+                    "success";
+
+                $popup_title =
+                    "Price Added";
+
+                $popup_icon =
+                    "fa fa-check";
+
+                $redirect_page =
+                    "products.php";
+            } else {
+
+                throw new Exception(
+                    "Price was not inserted."
+                );
+            }
+        } catch (Exception $e) {
+
+
+            /* =============================================
+               ERROR
+            ============================================== */
+
+            $popup_message =
+                "Price Add Failed: " .
+                $e->getMessage();
+
+            $popup_type =
+                "error";
+
+            $popup_title =
+                "Price Add Failed";
+
+            $popup_icon =
+                "fa fa-times";
         }
     }
 }
+
 ?>
 
+
 <!DOCTYPE html>
+
 <html lang="en">
+
 
 <head>
 
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+    <meta
+        http-equiv="Content-Type"
+        content="text/html; charset=UTF-8">
+
 
     <meta charset="utf-8">
 
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
-    <meta name="viewport"
+    <meta
+        http-equiv="X-UA-Compatible"
+        content="IE=edge">
+
+
+    <meta
+        name="viewport"
         content="width=device-width, initial-scale=1">
 
-    <title>Add Product Price</title>
+
+    <title>
+        Add Product Price
+    </title>
+
 
     <!-- Bootstrap -->
-    <link href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
+
+    <link
+        href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
         rel="stylesheet">
+
 
     <!-- Font Awesome -->
-    <link href="assets/vendors/font-awesome/css/font-awesome.min.css"
+
+    <link
+        href="assets/vendors/font-awesome/css/font-awesome.min.css"
         rel="stylesheet">
+
 
     <!-- NProgress -->
-    <link href="assets/vendors/nprogress/nprogress.css"
+
+    <link
+        href="assets/vendors/nprogress/nprogress.css"
         rel="stylesheet">
+
 
     <!-- iCheck -->
-    <link href="assets/vendors/iCheck/skins/flat/green.css"
+
+    <link
+        href="assets/vendors/iCheck/skins/flat/green.css"
         rel="stylesheet">
 
-    <!-- PNotify
-    <link href="assets/vendors/pnotify/dist/pnotify.css"
-        rel="stylesheet">
-
-    <link href="assets/vendors/pnotify/dist/pnotify.buttons.css"
-        rel="stylesheet">
-
-    <link href="assets/vendors/pnotify/dist/pnotify.nonblock.css" -->
-    <!-- rel="stylesheet"> -->
 
     <!-- Custom Theme -->
-    <link href="assets/css/custom.min.css"
+
+    <link
+        href="assets/css/custom.min.css"
         rel="stylesheet">
 
+
     <!-- Custom Popup -->
-    <link href="assets/css/custom-popup.css"
+
+    <link
+        href="assets/css/custom-popup.css"
         rel="stylesheet">
+
 
 </head>
 
+
 <body class="nav-md">
+
 
     <div class="container body">
 
+
         <div class="main_container">
+
 
             <!-- =====================================================
              SIDEBAR
@@ -204,7 +494,9 @@ if (isset($_POST['add_price'])) {
              RIGHT CONTENT
         ====================================================== -->
 
-            <div class="right_col" role="main">
+            <div
+                class="right_col"
+                role="main">
 
 
                 <!-- =================================================
@@ -217,6 +509,7 @@ if (isset($_POST['add_price'])) {
 
                         <nav>
 
+
                             <div class="nav toggle">
 
                                 <a id="menu_toggle">
@@ -228,64 +521,100 @@ if (isset($_POST['add_price'])) {
                             </div>
 
 
-                            <ul class="nav navbar-nav navbar-right">
+                            <ul
+                                class="nav navbar-nav navbar-right">
+
 
                                 <li>
 
-                                    <a href="javascript:;"
+
+                                    <a
+                                        href="javascript:;"
                                         class="user-profile dropdown-toggle"
                                         data-toggle="dropdown"
                                         aria-expanded="false">
 
-                                        <img src="assets/images/img.jpg"
-                                            alt="">
 
-                                        John Doe
+                                        <img
+                                            src="assets/images/img.jpg"
+                                            alt="Profile">
 
-                                        <span class="fa fa-angle-down"></span>
+
+                                        <?php
+
+                                        echo htmlspecialchars(
+                                            $admin['name'] ?? 'Admin'
+                                        );
+
+                                        ?>
+
+
+                                        <span
+                                            class="fa fa-angle-down"></span>
+
 
                                     </a>
 
 
-                                    <ul class="dropdown-menu dropdown-usermenu pull-right">
+                                    <ul
+                                        class="dropdown-menu dropdown-usermenu pull-right">
+
 
                                         <li>
+
                                             <a href="javascript:;">
                                                 Profile
                                             </a>
+
                                         </li>
 
+
                                         <li>
+
                                             <a href="javascript:;">
                                                 Settings
                                             </a>
+
                                         </li>
 
+
                                         <li>
+
                                             <a href="javascript:;">
                                                 Help
                                             </a>
+
                                         </li>
 
-                                        <li>
-                                            <a href="login.php">
 
-                                                <i class="fa fa-sign-out pull-right"></i>
+                                        <li>
+
+                                            <a href="../logout.php">
+
+                                                <i
+                                                    class="fa fa-sign-out pull-right"></i>
 
                                                 Log Out
 
                                             </a>
+
                                         </li>
+
 
                                     </ul>
 
+
                                 </li>
+
 
                             </ul>
 
+
                         </nav>
 
+
                     </div>
+
 
                 </div>
 
@@ -294,7 +623,8 @@ if (isset($_POST['add_price'])) {
                  PAGE CONTENT
             ================================================== -->
 
-                <div class="container-fluid"
+                <div
+                    class="container-fluid"
                     style="padding:25px;">
 
 
@@ -302,42 +632,59 @@ if (isset($_POST['add_price'])) {
 
                     <div class="row">
 
+
                         <div class="col-md-12">
 
+
                             <div class="page-title">
+
 
                                 <h3>
                                     Add Product Price
                                 </h3>
 
+
                                 <p class="text-muted">
-                                    Add pricing details for your product
+
+                                    Add pricing details
+                                    for your product
+
                                 </p>
+
 
                             </div>
 
+
                         </div>
+
 
                     </div>
 
 
                     <!-- =================================================
-                     FORM CARD
+                     FORM
                 ================================================== -->
 
                     <div class="row">
 
+
                         <div class="col-md-12">
+
 
                             <div class="x_panel">
 
+
                                 <div class="x_title">
+
 
                                     <h2>
                                         Product Price Information
                                     </h2>
 
-                                    <div class="clearfix"></div>
+
+                                    <div
+                                        class="clearfix"></div>
+
 
                                 </div>
 
@@ -345,38 +692,49 @@ if (isset($_POST['add_price'])) {
                                 <div class="x_content">
 
 
-                                    <form method="POST"
-                                        action="add_price.php?product_id=<?php echo $product_id; ?>">
+                                    <form
+                                        method="POST"
+                                        action="add_price.php?product_id=<?php echo (int)$product_id; ?>">
 
 
                                         <!-- PRODUCT -->
 
-                                        <div class="form-group">
+                                        <div
+                                            class="form-group">
+
 
                                             <label>
                                                 Product
                                             </label>
 
-                                            <input type="text"
+
+                                            <input
+                                                type="text"
                                                 class="form-control"
                                                 value="<?php echo htmlspecialchars($product['product_name']); ?>"
                                                 readonly>
+
 
                                         </div>
 
 
                                         <!-- PRODUCT ID -->
 
-                                        <div class="form-group">
+                                        <div
+                                            class="form-group">
+
 
                                             <label>
                                                 Product ID
                                             </label>
 
-                                            <input type="text"
+
+                                            <input
+                                                type="text"
                                                 class="form-control"
-                                                value="<?php echo $product_id; ?>"
+                                                value="<?php echo (int)$product_id; ?>"
                                                 readonly>
+
 
                                         </div>
 
@@ -388,23 +746,37 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
+
                                                         Original Price
-                                                        <span class="text-danger">*</span>
+
+                                                        <span
+                                                            class="text-danger">
+                                                            *
+                                                        </span>
+
                                                     </label>
 
-                                                    <input type="number"
+
+                                                    <input
+                                                        type="number"
                                                         name="original_price"
                                                         id="original_price"
                                                         class="form-control"
                                                         placeholder="Enter original price"
                                                         step="0.01"
-                                                        min="0"
+                                                        min="0.01"
+                                                        value="<?php echo htmlspecialchars($_POST['original_price'] ?? ''); ?>"
                                                         required>
 
+
                                                 </div>
+
 
                                             </div>
 
@@ -413,13 +785,18 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
                                                         Discount Percentage
                                                     </label>
 
-                                                    <input type="number"
+
+                                                    <input
+                                                        type="number"
                                                         name="discount_percentage"
                                                         id="discount_percentage"
                                                         class="form-control"
@@ -427,9 +804,11 @@ if (isset($_POST['add_price'])) {
                                                         step="0.01"
                                                         min="0"
                                                         max="100"
-                                                        value="0">
+                                                        value="<?php echo htmlspecialchars($_POST['discount_percentage'] ?? '0'); ?>">
+
 
                                                 </div>
+
 
                                             </div>
 
@@ -444,23 +823,37 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
+
                                                         Selling Price
-                                                        <span class="text-danger">*</span>
+
+                                                        <span
+                                                            class="text-danger">
+                                                            *
+                                                        </span>
+
                                                     </label>
 
-                                                    <input type="number"
+
+                                                    <input
+                                                        type="number"
                                                         name="selling_price"
                                                         id="selling_price"
                                                         class="form-control"
                                                         placeholder="Enter selling price"
                                                         step="0.01"
-                                                        min="0"
+                                                        min="0.01"
+                                                        value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>"
                                                         required>
 
+
                                                 </div>
+
 
                                             </div>
 
@@ -469,26 +862,56 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
                                                         Status
                                                     </label>
 
-                                                    <select name="status"
+
+                                                    <select
+                                                        name="status"
                                                         class="form-control">
 
-                                                        <option value="1">
+
+                                                        <option
+                                                            value="1"
+                                                            <?php
+
+                                                            echo (
+                                                                ($_POST['status'] ?? '1') == '1'
+                                                                ? 'selected'
+                                                                : ''
+                                                            );
+
+                                                            ?>>
                                                             Active
                                                         </option>
 
-                                                        <option value="0">
+
+                                                        <option
+                                                            value="0"
+                                                            <?php
+
+                                                            echo (
+                                                                ($_POST['status'] ?? '') == '0'
+                                                                ? 'selected'
+                                                                : ''
+                                                            );
+
+                                                            ?>>
                                                             Inactive
                                                         </option>
 
+
                                                     </select>
 
+
                                                 </div>
+
 
                                             </div>
 
@@ -503,17 +926,25 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
                                                         Start Date
                                                     </label>
 
-                                                    <input type="date"
+
+                                                    <input
+                                                        type="date"
                                                         name="start_date"
-                                                        class="form-control">
+                                                        class="form-control"
+                                                        value="<?php echo htmlspecialchars($_POST['start_date'] ?? ''); ?>">
+
 
                                                 </div>
+
 
                                             </div>
 
@@ -522,17 +953,25 @@ if (isset($_POST['add_price'])) {
 
                                             <div class="col-md-6">
 
-                                                <div class="form-group">
+
+                                                <div
+                                                    class="form-group">
+
 
                                                     <label>
                                                         End Date
                                                     </label>
 
-                                                    <input type="date"
+
+                                                    <input
+                                                        type="date"
                                                         name="end_date"
-                                                        class="form-control">
+                                                        class="form-control"
+                                                        value="<?php echo htmlspecialchars($_POST['end_date'] ?? ''); ?>">
+
 
                                                 </div>
+
 
                                             </div>
 
@@ -545,41 +984,53 @@ if (isset($_POST['add_price'])) {
                                         <div class="ln_solid"></div>
 
 
-                                        <div class="form-group">
+                                        <div
+                                            class="form-group">
 
-                                            <a href="products.php"
+
+                                            <a
+                                                href="products.php"
                                                 class="btn btn-default">
 
-                                                <i class="fa fa-times"></i>
+                                                <i
+                                                    class="fa fa-times"></i>
 
                                                 Cancel
 
                                             </a>
 
 
-                                            <button type="submit"
+                                            <button
+                                                type="submit"
                                                 name="add_price"
                                                 value="1"
                                                 class="btn btn-primary">
 
-                                                <i class="fa fa-save"></i>
+                                                <i
+                                                    class="fa fa-save"></i>
 
                                                 Add Price
 
                                             </button>
+
 
                                         </div>
 
 
                                     </form>
 
+
                                 </div>
+
 
                             </div>
 
+
                         </div>
 
+
                     </div>
+
 
                 </div>
 
@@ -590,95 +1041,145 @@ if (isset($_POST['add_price'])) {
 
                 <footer>
 
+
                     <div class="pull-right">
 
-                        Gentelella - Bootstrap Admin Template
+                        Fior Flower Shop -
+                        Admin Panel
 
                     </div>
 
+
                     <div class="clearfix"></div>
+
 
                 </footer>
 
+
             </div>
 
+
         </div>
+
 
     </div>
-
-
-    <!-- =========================================================
-     PNOTIFY
-========================================================= -->
-
-    <!-- <div id="custom_notifications"
-        class="custom-notifications dsp_none">
-
-        <ul class="list-unstyled notifications clearfix"
-            data-tabbed_notifications="notif-group">
-
-        </ul>
-
-        <div class="clearfix"></div>
-
-        <div id="notif-group"
-            class="tabbed_notifications">
-
-        </div>
-
-    </div> -->
 
 
     <!-- =========================================================
      JAVASCRIPT
 ========================================================= -->
 
-    <script src="assets/vendors/jquery/dist/jquery.min.js"></script>
 
-    <script src="assets/vendors/bootstrap/dist/js/bootstrap.min.js"></script>
-
-    <script src="assets/vendors/fastclick/lib/fastclick.js"></script>
-
-    <script src="assets/vendors/nprogress/nprogress.js"></script>
-
-    <script src="assets/vendors/iCheck/icheck.min.js"></script>
-
-    <!-- <script src="assets/vendors/pnotify/dist/pnotify.js"></script>
-
-    <script src="assets/vendors/pnotify/dist/pnotify.buttons.js"></script>
-
-    <script src="assets/vendors/pnotify/dist/pnotify.nonblock.js"></script> -->
-
-    <script src="assets/js/custom.min.js"></script>
-
-    <script src="assets/js/custom-popup.js"></script>
+    <script
+        src="assets/vendors/jquery/dist/jquery.min.js"></script>
 
 
-    <?php if ($popup_message != "") { ?>
+    <script
+        src="assets/vendors/bootstrap/dist/js/bootstrap.min.js"></script>
+
+
+    <script
+        src="assets/vendors/fastclick/lib/fastclick.js"></script>
+
+
+    <script
+        src="assets/vendors/nprogress/nprogress.js"></script>
+
+
+    <script
+        src="assets/vendors/iCheck/icheck.min.js"></script>
+
+
+    <script
+        src="assets/js/custom.min.js"></script>
+
+
+    <script
+        src="assets/js/custom-popup.js"></script>
+
+
+    <?php if ($popup_message !== "") { ?>
+
 
         <script>
-            document.addEventListener("DOMContentLoaded", function() {
+            document.addEventListener(
+                "DOMContentLoaded",
+                function() {
 
-                init_PNotify(
-                    <?php echo json_encode($popup_message); ?>,
-                    <?php echo json_encode($popup_type); ?>,
-                    <?php echo json_encode($popup_title); ?>,
-                    <?php echo json_encode($popup_icon); ?>
-                );
 
-                <?php if ($redirect_page != "") { ?>
+                    if (
+                        typeof init_PNotify === "function"
+                    ) {
 
-                    setTimeout(function() {
 
-                        window.location.href =
-                            <?php echo json_encode($redirect_page); ?>;
+                        init_PNotify(
 
-                    });
+                            <?php
+                            echo json_encode(
+                                $popup_message
+                            );
+                            ?>,
 
-                <?php } ?>
+                            <?php
+                            echo json_encode(
+                                $popup_type
+                            );
+                            ?>,
 
-            });
+                            <?php
+                            echo json_encode(
+                                $popup_title
+                            );
+                            ?>,
+
+                            <?php
+                            echo json_encode(
+                                $popup_icon
+                            );
+                            ?>
+
+                        );
+
+
+                    } else {
+
+
+                        alert(
+                            <?php
+                            echo json_encode(
+                                $popup_message
+                            );
+                            ?>
+                        );
+
+                    }
+
+
+                    <?php if ($redirect_page !== "") { ?>
+
+
+                        setTimeout(
+                            function() {
+
+                                window.location.href =
+                                    <?php
+                                    echo json_encode(
+                                        $redirect_page
+                                    );
+                                    ?>;
+
+                            },
+                            1500
+                        );
+
+
+                    <?php } ?>
+
+
+                }
+            );
         </script>
+
 
     <?php } ?>
 

@@ -1,11 +1,12 @@
 <?php
 
 session_start();
+
 include "../config/database.php";
 
-// ======================================================
-// 1. CHECK LOGIN
-// ======================================================
+/* =========================================================
+   1. CHECK LOGIN
+========================================================= */
 
 if (!isset($_SESSION['user_id'])) {
 
@@ -13,99 +14,130 @@ if (!isset($_SESSION['user_id'])) {
   exit;
 }
 
-
 $login_user_id = $_SESSION['user_id'];
 
 
-// ======================================================
-// 2. CHECK ADMIN
-// ======================================================
+/* =========================================================
+   2. CHECK ADMIN
+========================================================= */
 
-$admin_check_sql = "SELECT
-                        user_id,
-                        name,
-                        phone,
-                        role,
-                        status,
-                        created_at
-                    FROM users
-                    WHERE user_id = :user_id
-                    LIMIT 1";
+$admin_check_sql = "
+    SELECT
+        user_id,
+        name,
+        phone,
+        role,
+        status,
+        created_at
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+";
 
 $stmt = $conn->prepare($admin_check_sql);
 
 $stmt->execute([
-  'user_id' => $login_user_id
+  ':user_id' => $login_user_id
 ]);
 
 $admin = $stmt->fetch(PDO::FETCH_ASSOC);
 
+
+/* User not found */
+
 if (!$admin) {
+
   header("Location: ../index.php");
   exit;
 }
 
-if ($admin['role'] != 'admin') {
+
+/* Check admin */
+
+if ($admin['role'] !== 'admin') {
+
   header("Location: ../index.php");
   exit;
 }
-
 
 
 /* =========================================================
-   DELETE CATEGORY
+   3. DELETE CATEGORY
 ========================================================= */
 
 if (isset($_GET['delete']) && !empty($_GET['delete'])) {
 
   $category_id = (int) $_GET['delete'];
 
-  /* Check category exists */
+
+  /* ---------------------------------------------
+       Get category information
+    --------------------------------------------- */
+
   $check_sql = "
-        SELECT category_image
+        SELECT
+            category_id,
+            category_image
         FROM product_category
-        WHERE category_id = $category_id
+        WHERE category_id = :category_id
         LIMIT 1
     ";
+
   $check_stmt = $conn->prepare($check_sql);
-  $check_stmt->execute();
+
+  $check_stmt->execute([
+    ':category_id' => $category_id
+  ]);
 
   $category = $check_stmt->fetch(PDO::FETCH_ASSOC);
 
 
+  /* ---------------------------------------------
+       Category exists
+    --------------------------------------------- */
+
   if ($category) {
 
-    /* Delete category */
+    try {
 
-    /* Delete category */
-    $delete_sql = "
-            DELETE FROM product_category
-            WHERE category_id = $category_id
-        ";
+      /* Delete category */
 
-    if ($conn->query($delete_sql)) {
+      $delete_sql = "
+                DELETE FROM product_category
+                WHERE category_id = :category_id
+            ";
 
-      /* Delete category image */
-      if (
-        !empty($category['category_image'])
-      ) {
+      $delete_stmt = $conn->prepare($delete_sql);
 
-        $image_path =
-          "uploads/categories/" .
-          $category['category_image'];
+      $delete_stmt->execute([
+        ':category_id' => $category_id
+      ]);
+
+
+      /* -----------------------------------------
+               Delete category image
+            ----------------------------------------- */
+
+      if (!empty($category['category_image'])) {
+
+        $image_path = "uploads/categories/" . $category['category_image'];
 
         if (file_exists($image_path)) {
+
           unlink($image_path);
         }
       }
 
-      /* Redirect back */
+
+      /* -----------------------------------------
+               Redirect
+            ----------------------------------------- */
+
       header("Location: category-management.php?deleted=1");
       exit;
-    } else {
+    } catch (PDOException $e) {
 
-      die("Category Delete Error: " .
-        $conn->error);
+      die("Category Delete Error: " . $e->getMessage());
     }
   } else {
 
@@ -116,7 +148,7 @@ if (isset($_GET['delete']) && !empty($_GET['delete'])) {
 
 
 /* =========================================================
-   CATEGORY DATA
+   4. CATEGORY DATA
 ========================================================= */
 
 $category_sql = "
@@ -126,113 +158,196 @@ $category_sql = "
 ";
 
 $category_stmt = $conn->query($category_sql);
+
 $categories = $category_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
 /* =========================================================
-SUBCATEGORY DATA
+   5. SUBCATEGORY DATA
 ========================================================= */
-$subcategory_sql = "SELECT * FROM product_subcategory ORDER BY subcategory_id ASC";
-$subcategory_result = mysqli_query($conn, $subcategory_sql);
 
-/* =========================================================
-ADD CATEGORY
-========================================================= */
-if (isset($_POST['add_product'])) {
-
-  $category_id = mysqli_real_escape_string($conn, $_POST['category_id']);
-  $subcategory_id = mysqli_real_escape_string($conn, $_POST['subcategory_id']);
-  $product_name = mysqli_real_escape_string($conn, $_POST['product_name']);
-  $product_code = mysqli_real_escape_string($conn, $_POST['product_code']);
-  $stock_quantity = (int)$_POST['stock_quantity'];
-  $product_description = mysqli_real_escape_string(
-    $conn,
-    $_POST['product_description']
-  );
-
-  $insert_sql = "
-INSERT INTO products
-(
-subcategory_id,
-product_name,
-product_code,
-stock_quantity,
-product_description,
-status
-)
-VALUES
-(
-'$subcategory_id',
-'$product_name',
-'$product_code',
-'$stock_quantity',
-'$product_description',
-1
-)
+$subcategory_sql = "
+    SELECT *
+    FROM product_subcategory
+    ORDER BY subcategory_id ASC
 ";
 
-  if (mysqli_query($conn, $insert_sql)) {
+$subcategory_stmt = $conn->query($subcategory_sql);
 
-    $product_id = mysqli_insert_id($conn);
+$subcategories = $subcategory_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    header("Location: add_price.php?product_id=" . $product_id);
+
+/* =========================================================
+   6. ADD PRODUCT
+========================================================= */
+
+if (isset($_POST['add_product'])) {
+
+  $subcategory_id = $_POST['subcategory_id'] ?? '';
+
+  $product_name = trim(
+    $_POST['product_name'] ?? ''
+  );
+
+  $product_code = trim(
+    $_POST['product_code'] ?? ''
+  );
+
+  $stock_quantity = (int)(
+    $_POST['stock_quantity'] ?? 0
+  );
+
+  $product_description = trim(
+    $_POST['product_description'] ?? ''
+  );
+
+
+  /* ---------------------------------------------
+       Validation
+    --------------------------------------------- */
+
+  if (
+    $subcategory_id === '' ||
+    $product_name === ''
+  ) {
+
+    die("Please fill all required fields.");
+  }
+
+
+  try {
+
+    /* -----------------------------------------
+           Insert Product
+        ----------------------------------------- */
+
+    $insert_sql = "
+            INSERT INTO products
+            (
+                subcategory_id,
+                product_name,
+                product_code,
+                stock_quantity,
+                product_description,
+                status
+            )
+            VALUES
+            (
+                :subcategory_id,
+                :product_name,
+                :product_code,
+                :stock_quantity,
+                :product_description,
+                1
+            )
+            RETURNING product_id
+        ";
+
+
+    $insert_stmt = $conn->prepare($insert_sql);
+
+
+    $insert_stmt->execute([
+
+      ':subcategory_id' =>
+      $subcategory_id,
+
+      ':product_name' =>
+      $product_name,
+
+      ':product_code' =>
+      $product_code,
+
+      ':stock_quantity' =>
+      $stock_quantity,
+
+      ':product_description' =>
+      $product_description
+    ]);
+
+
+    /* -----------------------------------------
+           Get inserted product ID
+        ----------------------------------------- */
+
+    $product_id = $insert_stmt->fetchColumn();
+
+
+    /* -----------------------------------------
+           Redirect to add price
+        ----------------------------------------- */
+
+    header(
+      "Location: add_price.php?product_id=" .
+        $product_id
+    );
+
     exit;
-  } else {
+  } catch (PDOException $e) {
 
-    echo "Product Error: " . mysqli_error($conn);
+    die("Product Error: " .
+      $e->getMessage());
   }
 }
+
 ?>
-<!-- <?php if (isset($_GET['deleted'])) { ?>
-
-  <div class="alert alert-success">
-    <i class="fa fa-check-circle"></i>
-    <!-- Category deleted successfully. -->
-</div>
-
-<?php } ?> -->
 
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
 
   <meta charset="utf-8">
 
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta
+    http-equiv="X-UA-Compatible"
+    content="IE=edge">
 
-  <meta name="viewport"
+  <meta
+    name="viewport"
     content="width=device-width, initial-scale=1">
 
   <title>Category Management</title>
 
+
   <!-- Bootstrap -->
+
   <link
     href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
     rel="stylesheet">
 
+
   <!-- Font Awesome -->
+
   <link
     href="assets/vendors/font-awesome/css/font-awesome.min.css"
     rel="stylesheet">
 
+
   <!-- NProgress -->
+
   <link
     href="assets/vendors/nprogress/nprogress.css"
     rel="stylesheet">
 
+
   <!-- Custom Theme -->
+
   <link
     href="assets/css/custom.min.css"
     rel="stylesheet">
 
 </head>
 
+
 <body class="nav-md">
+
 
   <div class="container body">
 
     <div class="main_container">
+
 
       <!-- =====================================================
              SIDEBAR
@@ -245,7 +360,10 @@ VALUES
              RIGHT CONTENT
         ====================================================== -->
 
-      <div class="right_col" role="main">
+      <div
+        class="right_col"
+        role="main">
+
 
         <!-- =================================================
                  TOP NAVIGATION
@@ -256,6 +374,9 @@ VALUES
           <div class="nav_menu">
 
             <nav>
+
+
+              <!-- Menu Toggle -->
 
               <div class="nav toggle">
 
@@ -268,11 +389,18 @@ VALUES
               </div>
 
 
-              <ul class="nav navbar-nav navbar-right">
+              <!-- Right Menu -->
+
+              <ul
+                class="nav navbar-nav navbar-right">
+
+
+                <!-- User Profile -->
 
                 <li>
 
-                  <a href="javascript:;"
+                  <a
+                    href="javascript:;"
                     class="user-profile dropdown-toggle"
                     data-toggle="dropdown">
 
@@ -280,37 +408,61 @@ VALUES
                       src="assets/images/img.jpg"
                       alt="">
 
-                    John Doe
+                    <?php
+                    echo htmlspecialchars(
+                      $admin['name']
+                    );
+                    ?>
 
-                    <span class="fa fa-angle-down"></span>
+                    <span
+                      class="fa fa-angle-down"></span>
 
                   </a>
 
-                  <ul class="dropdown-menu dropdown-usermenu pull-right">
+
+                  <ul
+                    class="dropdown-menu dropdown-usermenu pull-right">
+
 
                     <li>
+
                       <a href="profile.php">
+
                         Profile
+
                       </a>
+
                     </li>
 
+
                     <li>
+
                       <a href="javascript:;">
+
                         Settings
+
                       </a>
+
                     </li>
 
+
                     <li>
+
                       <a href="javascript:;">
+
                         Help
+
                       </a>
+
                     </li>
+
 
                     <li>
 
-                      <a href="login.php">
+                      <a href="logout.php">
 
-                        <i class="fa fa-sign-out pull-right"></i>
+                        <i
+                          class="fa fa-sign-out pull-right"></i>
 
                         Log Out
 
@@ -318,27 +470,36 @@ VALUES
 
                     </li>
 
+
                   </ul>
 
                 </li>
 
 
-                <li role="presentation"
+                <!-- Notification -->
+
+                <li
+                  role="presentation"
                   class="dropdown">
 
-                  <a href="javascript:;"
+                  <a
+                    href="javascript:;"
                     class="dropdown-toggle info-number"
                     data-toggle="dropdown">
 
-                    <i class="fa fa-envelope-o"></i>
+                    <i
+                      class="fa fa-envelope-o"></i>
 
                     <span class="badge bg-green">
+
                       6
+
                     </span>
 
                   </a>
 
                 </li>
+
 
               </ul>
 
@@ -359,6 +520,7 @@ VALUES
 
             <div class="col-md-12">
 
+
               <!-- PAGE HEADER -->
 
               <div class="page-title">
@@ -377,7 +539,37 @@ VALUES
 
               </div>
 
+
               <div class="clearfix"></div>
+
+
+              <!-- =================================================
+                             SUCCESS MESSAGE
+                        ================================================== -->
+
+              <?php
+
+              if (
+                isset($_GET['deleted']) &&
+                $_GET['deleted'] == 1
+              ) {
+
+              ?>
+
+                <div class="alert alert-success">
+
+                  <i
+                    class="fa fa-check-circle"></i>
+
+                  Category deleted successfully.
+
+                </div>
+
+              <?php
+
+              }
+
+              ?>
 
 
               <!-- =================================================
@@ -385,6 +577,7 @@ VALUES
                         ================================================== -->
 
               <div class="x_panel">
+
 
                 <div class="x_title">
 
@@ -399,30 +592,49 @@ VALUES
 
                 <div class="x_content">
 
+
                   <div class="table-responsive">
+
 
                     <table
                       class="table table-striped table-bordered">
+
 
                       <thead>
 
                         <tr>
 
-                          <th>#</th>
+                          <th>
+                            #
+                          </th>
 
-                          <th>Category ID</th>
+                          <th>
+                            Category ID
+                          </th>
 
-                          <th>Category Image</th>
+                          <th>
+                            Category Image
+                          </th>
 
-                          <th>Category Name</th>
+                          <th>
+                            Category Name
+                          </th>
 
-                          <th>Description</th>
+                          <th>
+                            Description
+                          </th>
 
-                          <th>Status</th>
+                          <th>
+                            Status
+                          </th>
 
-                          <th>Created Date</th>
+                          <th>
+                            Created Date
+                          </th>
 
-                          <th>Action</th>
+                          <th>
+                            Action
+                          </th>
 
                         </tr>
 
@@ -431,60 +643,85 @@ VALUES
 
                       <tbody>
 
+
                         <?php
 
-                        if (count($categories) > 0) {
+                        if (
+                          count($categories) > 0
+                        ) {
 
                           $count = 1;
 
-                          foreach ($categories as $category) {
+
+                          foreach (
+                            $categories
+                            as $category
+                          ) {
 
                         ?>
 
+
                             <tr>
 
+
+                              <!-- Number -->
+
                               <td>
+
                                 <?php
                                 echo $count++;
                                 ?>
+
                               </td>
 
 
+                              <!-- Category ID -->
+
                               <td>
+
                                 <?php
+
                                 echo htmlspecialchars(
                                   $category['category_id']
                                 );
+
                                 ?>
+
                               </td>
 
 
+                              <!-- Category Image -->
+
                               <td>
 
+
                                 <?php
+
                                 if (
                                   !empty($category['category_image'])
                                 ) {
-                                ?>
 
+                                ?>
                                   <img
-                                    src="uploads/categories/<?php
-                                                            echo htmlspecialchars(
-                                                              $category['category_image']
-                                                            );
-                                                            ?>"
+                                    src="../assets/images/<?php
+                                                          echo htmlspecialchars($category['category_image']);
+                                                          ?>"
                                     style="
-                                                                width:60px;
-                                                                height:60px;
-                                                                object-fit:cover;
-                                                                border-radius:8px;
-                                                            ">
-
+        width:60px;
+        height:60px;
+        object-fit:cover;
+        border-radius:8px;
+    "
+                                    alt="Category">
                                 <?php
+
                                 } else {
+
                                 ?>
 
-                                  <div style="
+
+                                  <div
+                                    style="
                                                             width:60px;
                                                             height:60px;
                                                             background:#f1f1f1;
@@ -494,25 +731,33 @@ VALUES
                                                             border-radius:8px;
                                                         ">
 
-                                    <i class="fa fa-image"></i>
+                                    <i
+                                      class="fa fa-image"></i>
 
                                   </div>
 
+
                                 <?php
+
                                 }
+
                                 ?>
 
                               </td>
 
+
+                              <!-- Category Name -->
 
                               <td>
 
                                 <strong>
 
                                   <?php
+
                                   echo htmlspecialchars(
                                     $category['category_name']
                                   );
+
                                   ?>
 
                                 </strong>
@@ -520,7 +765,10 @@ VALUES
                               </td>
 
 
+                              <!-- Description -->
+
                               <td>
+
 
                                 <?php
 
@@ -541,7 +789,10 @@ VALUES
                               </td>
 
 
+                              <!-- Status -->
+
                               <td>
+
 
                                 <?php
 
@@ -549,14 +800,30 @@ VALUES
                                   $category['status'] == 1
                                 ) {
 
-                                  echo '<span class="label label-success">
-                                                                Active
-                                                              </span>';
+                                ?>
+
+                                  <span
+                                    class="label label-success">
+
+                                    Active
+
+                                  </span>
+
+                                <?php
+
                                 } else {
 
-                                  echo '<span class="label label-default">
-                                                                Inactive
-                                                              </span>';
+                                ?>
+
+                                  <span
+                                    class="label label-default">
+
+                                    Inactive
+
+                                  </span>
+
+                                <?php
+
                                 }
 
                                 ?>
@@ -564,46 +831,74 @@ VALUES
                               </td>
 
 
+                              <!-- Created Date -->
+
                               <td>
+
 
                                 <?php
 
-                                echo date(
-                                  "d M Y, h:i A",
-                                  strtotime(
-                                    $category['created_at']
-                                  )
-                                );
+                                if (
+                                  !empty($category['created_at'])
+                                ) {
+
+                                  echo date(
+                                    "d M Y, h:i A",
+                                    strtotime(
+                                      $category['created_at']
+                                    )
+                                  );
+                                } else {
+
+                                  echo "N/A";
+                                }
 
                                 ?>
 
                               </td>
 
 
+                              <!-- Actions -->
+
                               <td>
+
+
+                                <!-- Edit -->
 
                                 <a
                                   href="edit_category.php?id=<?php
-                                                              echo $category['category_id'];
+                                                              echo (int)$category['category_id'];
                                                               ?>"
-                                  class="btn btn-warning btn-sm">
+                                  class="btn btn-warning btn-sm"
+                                  title="Edit Category">
 
-                                  <i class="fa fa-edit"></i>
+                                  <i
+                                    class="fa fa-edit"></i>
 
                                 </a>
+
+
+                                <!-- Delete -->
+
                                 <a
-                                  href="category-management.php?delete=<?php echo (int)$category['category_id']; ?>"
+                                  href="category-management.php?delete=<?php
+                                                                        echo (int)$category['category_id'];
+                                                                        ?>"
                                   class="btn btn-danger btn-sm"
                                   title="Delete Category"
                                   onclick="return confirm('Are you sure you want to delete this category?');">
 
-                                  <i class="fa fa-trash"></i>
+                                  <i
+                                    class="fa fa-trash"></i>
 
                                 </a>
 
+
                               </td>
 
+
                             </tr>
+
 
                           <?php
 
@@ -611,6 +906,7 @@ VALUES
                         } else {
 
                           ?>
+
 
                           <tr>
 
@@ -624,16 +920,22 @@ VALUES
 
                           </tr>
 
+
                         <?php
+
                         }
 
                         ?>
 
+
                       </tbody>
+
 
                     </table>
 
+
                   </div>
+
 
                 </div>
 
@@ -641,7 +943,7 @@ VALUES
 
 
               <!-- =================================================
-                             ADD PRODUCT BUTTON
+                             ADD CATEGORY BUTTON
                         ================================================== -->
 
               <div class="text-right">
@@ -650,9 +952,10 @@ VALUES
                   href="add_category.php"
                   class="btn btn-primary">
 
-                  <i class="fa fa-plus"></i>
+                  <i
+                    class="fa fa-plus"></i>
 
-                  Add Category
+                  Add Flower Category
 
                 </a>
 
@@ -683,6 +986,7 @@ VALUES
 
         </footer>
 
+
       </div>
 
     </div>
@@ -694,53 +998,47 @@ VALUES
      JAVASCRIPT
 ========================================================= -->
 
+
   <!-- jQuery -->
 
   <script
-    src="assets/vendors/jquery/dist/jquery.min.js">
-  </script>
+    src="assets/vendors/jquery/dist/jquery.min.js"></script>
 
 
   <!-- Bootstrap -->
 
   <script
-    src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
-  </script>
+    src="assets/vendors/bootstrap/dist/js/bootstrap.min.js"></script>
 
 
   <!-- FastClick -->
 
   <script
-    src="assets/vendors/fastclick/lib/fastclick.js">
-  </script>
+    src="assets/vendors/fastclick/lib/fastclick.js"></script>
 
 
   <!-- NProgress -->
 
   <script
-    src="assets/vendors/nprogress/nprogress.js">
-  </script>
+    src="assets/vendors/nprogress/nprogress.js"></script>
 
 
   <!-- Bootstrap Progressbar -->
 
   <script
-    src="assets/vendors/bootstrap-progressbar/bootstrap-progressbar.min.js">
-  </script>
+    src="assets/vendors/bootstrap-progressbar/bootstrap-progressbar.min.js"></script>
 
 
   <!-- iCheck -->
 
   <script
-    src="assets/vendors/iCheck/icheck.min.js">
-  </script>
+    src="assets/vendors/iCheck/icheck.min.js"></script>
 
 
   <!-- Custom Theme -->
 
   <script
-    src="assets/js/custom.min.js">
-  </script>
+    src="assets/js/custom.min.js"></script>
 
 
 </body>

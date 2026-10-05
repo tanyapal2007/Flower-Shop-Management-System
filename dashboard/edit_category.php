@@ -1,6 +1,66 @@
 <?php
-session_start();
-include "../config/database.php";
+
+/* =========================================================
+   START SESSION
+========================================================= */
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+
+/* =========================================================
+   DATABASE CONNECTION
+========================================================= */
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   CHECK LOGIN
+========================================================= */
+
+if (!isset($_SESSION['user_id'])) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+/* =========================================================
+   CHECK ADMIN
+========================================================= */
+
+$user_id = $_SESSION['user_id'];
+
+$admin_sql = "
+    SELECT user_id, name, phone, role, status
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+";
+
+$admin_stmt = $conn->prepare($admin_sql);
+
+$admin_stmt->execute([
+    ':user_id' => $user_id
+]);
+
+$admin = $admin_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+/* =========================================================
+   ADMIN VALIDATION
+========================================================= */
+
+if (
+    !$admin ||
+    $admin['role'] !== 'admin' ||
+    (int)$admin['status'] !== 1
+) {
+    header("Location: ../index.php");
+    exit;
+}
+
 
 /* =========================================================
    GET CATEGORY ID
@@ -11,23 +71,44 @@ if (!isset($_GET['id']) || empty($_GET['id'])) {
     exit;
 }
 
-$category_id = (int) $_GET['id'];
+$category_id = (int)$_GET['id'];
 
 
 /* =========================================================
    FETCH CATEGORY
 ========================================================= */
 
-$sql = "SELECT * FROM product_category WHERE category_id = $category_id LIMIT 1";
+$sql = "
+    SELECT *
+    FROM product_category
+    WHERE category_id = :category_id
+    LIMIT 1
+";
 
-$result = mysqli_query($conn, $sql);
+$stmt = $conn->prepare($sql);
 
-if (!$result || mysqli_num_rows($result) == 0) {
+$stmt->execute([
+    ':category_id' => $category_id
+]);
+
+$category = $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+/* =========================================================
+   CATEGORY NOT FOUND
+========================================================= */
+
+if (!$category) {
     header("Location: category-management.php");
     exit;
 }
 
-$category = mysqli_fetch_assoc($result);
+
+/* =========================================================
+   ERROR VARIABLE
+========================================================= */
+
+$error = "";
 
 
 /* =========================================================
@@ -36,103 +117,276 @@ $category = mysqli_fetch_assoc($result);
 
 if (isset($_POST['update_category'])) {
 
-    $category_name = mysqli_real_escape_string(
-        $conn,
-        trim($_POST['category_name'])
+    /* =====================================================
+       GET FORM DATA
+    ===================================================== */
+
+    $category_name = trim(
+        $_POST['category_name'] ?? ''
     );
 
-    $category_description = mysqli_real_escape_string(
-        $conn,
-        trim($_POST['category_description'])
+    $category_description = trim(
+        $_POST['category_description'] ?? ''
     );
 
-    $status = isset($_POST['status']) ? (int)$_POST['status'] : 0;
-
-    /* Keep old image */
-    $category_image = $category['category_image'];
+    $status = isset($_POST['status'])
+        ? (int)$_POST['status']
+        : 0;
 
 
     /* =====================================================
-       IMAGE UPLOAD
+       VALIDATE CATEGORY NAME
     ===================================================== */
 
-    if (
-        isset($_FILES['category_image']) &&
-        $_FILES['category_image']['error'] == 0
-    ) {
+    if ($category_name === '') {
 
-        $upload_dir = "uploads/categories/";
+        $error = "Category name is required.";
+    } else {
 
-        if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
+        /* =================================================
+           KEEP OLD IMAGE
+        ================================================= */
+
+        $category_image =
+            $category['category_image'] ?? "";
+
+
+        /* =================================================
+           IMAGE UPLOAD
+        ================================================= */
+
+        if (
+            isset($_FILES['category_image']) &&
+            $_FILES['category_image']['error'] != UPLOAD_ERR_NO_FILE
+        ) {
+
+            /* ---------------------------------------------
+               CHECK UPLOAD ERROR
+            --------------------------------------------- */
+
+            if (
+                $_FILES['category_image']['error']
+                != UPLOAD_ERR_OK
+            ) {
+
+                $error =
+                    "Image upload error. Error Code: " .
+                    $_FILES['category_image']['error'];
+            } else {
+
+                /* -----------------------------------------
+                   GET IMAGE DETAILS
+                ----------------------------------------- */
+
+                $file_name =
+                    $_FILES['category_image']['name'];
+
+                $tmp_name =
+                    $_FILES['category_image']['tmp_name'];
+
+                $extension = strtolower(
+                    pathinfo(
+                        $file_name,
+                        PATHINFO_EXTENSION
+                    )
+                );
+
+
+                /* -----------------------------------------
+                   ALLOWED EXTENSIONS
+                ----------------------------------------- */
+
+                $allowed = [
+                    'jpg',
+                    'jpeg',
+                    'png',
+                    'webp'
+                ];
+
+
+                if (!in_array($extension, $allowed)) {
+
+                    $error =
+                        "Only JPG, JPEG, PNG and WEBP images are allowed.";
+                } else {
+
+                    /* -------------------------------------
+                       UPLOAD DIRECTORY
+                    ------------------------------------- */
+
+                    $upload_dir =
+                        "../assets/images/";
+
+
+                    /* -------------------------------------
+                       CREATE DIRECTORY
+                    ------------------------------------- */
+
+                    if (!is_dir($upload_dir)) {
+
+                        mkdir(
+                            $upload_dir,
+                            0777,
+                            true
+                        );
+                    }
+
+
+                    /* -------------------------------------
+                       GENERATE NEW IMAGE NAME
+                    ------------------------------------- */
+
+                    $new_name =
+                        "category_" .
+                        time() .
+                        "_" .
+                        rand(1000, 9999) .
+                        "." .
+                        $extension;
+
+
+                    $new_image_path =
+                        $upload_dir .
+                        $new_name;
+
+
+                    /* -------------------------------------
+                       MOVE NEW IMAGE
+                    ------------------------------------- */
+
+                    if (
+                        move_uploaded_file(
+                            $tmp_name,
+                            $new_image_path
+                        )
+                    ) {
+
+                        /* ---------------------------------
+                           DELETE OLD IMAGE
+                        --------------------------------- */
+
+                        if (
+                            !empty($category['category_image'])
+                        ) {
+
+                            $old_image_path =
+                                $upload_dir .
+                                $category['category_image'];
+
+
+                            if (
+                                file_exists(
+                                    $old_image_path
+                                )
+                            ) {
+
+                                unlink(
+                                    $old_image_path
+                                );
+                            }
+                        }
+
+
+                        /* ---------------------------------
+                           USE NEW IMAGE
+                        --------------------------------- */
+
+                        $category_image =
+                            $new_name;
+                    } else {
+
+                        $error =
+                            "New image could not be uploaded.";
+                    }
+                }
+            }
         }
 
-        $file_name = $_FILES['category_image']['name'];
-        $tmp_name = $_FILES['category_image']['tmp_name'];
 
-        $extension = strtolower(
-            pathinfo($file_name, PATHINFO_EXTENSION)
-        );
+        /* =================================================
+           UPDATE DATABASE
+        ================================================= */
 
-        $allowed = ['jpg', 'jpeg', 'png', 'webp'];
+        if ($error === "") {
 
-        if (in_array($extension, $allowed)) {
+            try {
 
-            $new_name =
-                "category_" .
-                time() .
-                "_" .
-                rand(1000, 9999) .
-                "." .
-                $extension;
+                $update_sql = "
+                    UPDATE product_category
+                    SET
+                        category_name = :category_name,
+                        category_description = :category_description,
+                        category_image = :category_image,
+                        status = :status
+                    WHERE category_id = :category_id
+                ";
 
-            if (move_uploaded_file(
-                $tmp_name,
-                $upload_dir . $new_name
-            )) {
 
-                /* Delete old image */
-                if (
-                    !empty($category['category_image']) &&
-                    file_exists(
-                        $upload_dir . $category['category_image']
-                    )
-                ) {
+                $update_stmt =
+                    $conn->prepare($update_sql);
 
-                    unlink(
-                        $upload_dir .
-                            $category['category_image']
-                    );
-                }
 
-                $category_image = $new_name;
+                $update_stmt->execute([
+
+                    ':category_name' =>
+                    $category_name,
+
+                    ':category_description' =>
+                    $category_description,
+
+                    ':category_image' =>
+                    $category_image,
+
+                    ':status' =>
+                    $status,
+
+                    ':category_id' =>
+                    $category_id
+
+                ]);
+
+
+                /* -----------------------------------------
+                   REDIRECT AFTER SUCCESS
+                ----------------------------------------- */
+
+                header(
+                    "Location: category-management.php"
+                );
+
+                exit;
+            } catch (PDOException $e) {
+
+                $error =
+                    "Database Error: " .
+                    $e->getMessage();
             }
         }
     }
 
 
     /* =====================================================
-       UPDATE QUERY
+       FETCH UPDATED DATA IF ERROR OCCURS
     ===================================================== */
 
-    $update_sql = "
-        UPDATE product_category
-        SET
-            category_name = '$category_name',
-            category_description = '$category_description',
-            category_image = '$category_image',
-            status = '$status'
-        WHERE category_id = $category_id
-    ";
+    if ($error !== "") {
 
+        $refresh_sql = "
+            SELECT *
+            FROM product_category
+            WHERE category_id = :category_id
+            LIMIT 1
+        ";
 
-    if (mysqli_query($conn, $update_sql)) {
+        $refresh_stmt =
+            $conn->prepare($refresh_sql);
 
-        header("Location: category-management.php");
-        exit;
-    } else {
+        $refresh_stmt->execute([
+            ':category_id' => $category_id
+        ]);
 
-        $error = mysqli_error($conn);
+        $category =
+            $refresh_stmt->fetch(PDO::FETCH_ASSOC);
     }
 }
 
@@ -145,7 +399,8 @@ if (isset($_POST['update_category'])) {
 
     <meta charset="utf-8">
 
-    <meta name="viewport"
+    <meta
+        name="viewport"
         content="width=device-width, initial-scale=1">
 
     <title>Edit Category</title>
@@ -190,28 +445,29 @@ if (isset($_POST['update_category'])) {
 
 
             <!-- =====================================================
-             SIDEBAR
-        ====================================================== -->
+                 SIDEBAR
+            ====================================================== -->
 
             <?php include "sidebar.php"; ?>
 
 
             <!-- =====================================================
-             RIGHT CONTENT
-        ====================================================== -->
+                 RIGHT CONTENT
+            ====================================================== -->
 
             <div class="right_col" role="main">
 
 
                 <!-- =================================================
-                 TOP NAVIGATION
-            ================================================== -->
+                     TOP NAVIGATION
+                ================================================== -->
 
                 <div class="top_nav">
 
                     <div class="nav_menu">
 
                         <nav>
+
 
                             <div class="nav toggle">
 
@@ -224,20 +480,31 @@ if (isset($_POST['update_category'])) {
                             </div>
 
 
-                            <ul class="nav navbar-nav navbar-right">
+                            <ul
+                                class="nav navbar-nav navbar-right">
+
 
                                 <li>
 
                                     <a
                                         href="javascript:;"
                                         class="user-profile dropdown-toggle"
-                                        data-toggle="dropdown">
+                                        data-toggle="dropdown"
+                                        aria-expanded="false">
 
                                         <img
                                             src="assets/images/img.jpg"
                                             alt="">
 
-                                        John Doe
+
+                                        <?php
+
+                                        echo htmlspecialchars(
+                                            $admin['name']
+                                        );
+
+                                        ?>
+
 
                                         <span
                                             class="fa fa-angle-down">
@@ -249,27 +516,43 @@ if (isset($_POST['update_category'])) {
                                     <ul
                                         class="dropdown-menu dropdown-usermenu pull-right">
 
+
                                         <li>
+
                                             <a href="profile.php">
+
                                                 Profile
+
                                             </a>
+
                                         </li>
 
+
                                         <li>
+
                                             <a href="javascript:;">
+
                                                 Settings
+
                                             </a>
+
                                         </li>
 
+
                                         <li>
+
                                             <a href="javascript:;">
+
                                                 Help
+
                                             </a>
+
                                         </li>
+
 
                                         <li>
 
-                                            <a href="login.php">
+                                            <a href="logout.php">
 
                                                 <i
                                                     class="fa fa-sign-out pull-right">
@@ -281,9 +564,11 @@ if (isset($_POST['update_category'])) {
 
                                         </li>
 
+
                                     </ul>
 
                                 </li>
+
 
                             </ul>
 
@@ -295,10 +580,11 @@ if (isset($_POST['update_category'])) {
 
 
                 <!-- =================================================
-                 PAGE CONTENT
-            ================================================== -->
+                     PAGE CONTENT
+                ================================================== -->
 
                 <div class="container-fluid">
+
 
                     <div class="row">
 
@@ -319,17 +605,24 @@ if (isset($_POST['update_category'])) {
 
                             </div>
 
+
                             <div class="clearfix"></div>
 
 
-                            <!-- ERROR -->
+                            <!-- =================================================
+                                 ERROR MESSAGE
+                            ================================================== -->
 
-                            <?php if (isset($error)) { ?>
+                            <?php if ($error !== "") { ?>
 
                                 <div class="alert alert-danger">
 
                                     <?php
-                                    echo htmlspecialchars($error);
+
+                                    echo htmlspecialchars(
+                                        $error
+                                    );
+
                                     ?>
 
                                 </div>
@@ -338,10 +631,11 @@ if (isset($_POST['update_category'])) {
 
 
                             <!-- =================================================
-                             EDIT FORM
-                        ================================================== -->
+                                 EDIT FORM
+                            ================================================== -->
 
                             <div class="x_panel">
+
 
                                 <div class="x_title">
 
@@ -375,6 +669,7 @@ if (isset($_POST['update_category'])) {
                                                         Category ID
                                                     </label>
 
+
                                                     <input
                                                         type="text"
                                                         class="form-control"
@@ -400,34 +695,50 @@ if (isset($_POST['update_category'])) {
                                                         Status
                                                     </label>
 
+
                                                     <select
                                                         name="status"
                                                         class="form-control"
                                                         required>
 
+
                                                         <option
                                                             value="1"
                                                             <?php
+
                                                             if (
-                                                                $category['status'] == 1
+                                                                (int)$category['status']
+                                                                === 1
                                                             ) {
+
                                                                 echo "selected";
                                                             }
+
                                                             ?>>
+
                                                             Active
+
                                                         </option>
+
 
                                                         <option
                                                             value="0"
                                                             <?php
+
                                                             if (
-                                                                $category['status'] == 0
+                                                                (int)$category['status']
+                                                                === 0
                                                             ) {
+
                                                                 echo "selected";
                                                             }
+
                                                             ?>>
+
                                                             Inactive
+
                                                         </option>
+
 
                                                     </select>
 
@@ -442,11 +753,16 @@ if (isset($_POST['update_category'])) {
 
                                                 <div class="form-group">
 
+
                                                     <label>
 
                                                         Category Name
-                                                        <span class="text-danger">
+
+                                                        <span
+                                                            class="text-danger">
+
                                                             *
+
                                                         </span>
 
                                                     </label>
@@ -475,8 +791,11 @@ if (isset($_POST['update_category'])) {
 
                                                 <div class="form-group">
 
+
                                                     <label>
+
                                                         Category Description
+
                                                     </label>
 
 
@@ -485,27 +804,35 @@ if (isset($_POST['update_category'])) {
                                                         class="form-control"
                                                         rows="5"
                                                         placeholder="Enter category description"><?php
+
                                                                                                     echo htmlspecialchars(
                                                                                                         $category['category_description'] ?? ''
                                                                                                     );
+
                                                                                                     ?></textarea>
+
 
                                                 </div>
 
                                             </div>
 
 
-                                            <!-- OLD IMAGE -->
+                                            <!-- CURRENT IMAGE -->
 
                                             <div class="col-md-6">
 
                                                 <div class="form-group">
 
+
                                                     <label>
+
                                                         Current Image
+
                                                     </label>
 
+
                                                     <br>
+
 
                                                     <?php
 
@@ -514,21 +841,16 @@ if (isset($_POST['update_category'])) {
                                                     ) {
 
                                                     ?>
-
                                                         <img
-                                                            src="uploads/categories/<?php
-                                                                                    echo htmlspecialchars(
-                                                                                        $category['category_image']
-                                                                                    );
-                                                                                    ?>"
+                                                            src="assets/images/<?php echo htmlspecialchars($category['category_image']); ?>"
+                                                            alt="Category Image"
                                                             style="
-                                                            width:150px;
-                                                            height:150px;
-                                                            object-fit:cover;
-                                                            border-radius:10px;
-                                                            border:1px solid #ddd;
-                                                        ">
-
+                                                                width:150px;
+                                                                height:150px;
+                                                                object-fit:cover;
+                                                                border-radius:10px;
+                                                                border:1px solid #ddd;
+                                                            ">
                                                     <?php
 
                                                     } else {
@@ -537,14 +859,15 @@ if (isset($_POST['update_category'])) {
 
                                                         <div
                                                             style="
-                                                            width:150px;
-                                                            height:150px;
-                                                            background:#f5f5f5;
-                                                            display:flex;
-                                                            align-items:center;
-                                                            justify-content:center;
-                                                            border-radius:10px;
-                                                        ">
+                                                                width:150px;
+                                                                height:150px;
+                                                                background:#f5f5f5;
+                                                                display:flex;
+                                                                align-items:center;
+                                                                justify-content:center;
+                                                                border-radius:10px;
+                                                                border:1px solid #ddd;
+                                                            ">
 
                                                             <i
                                                                 class="fa fa-image fa-3x text-muted">
@@ -558,6 +881,7 @@ if (isset($_POST['update_category'])) {
 
                                                     ?>
 
+
                                                 </div>
 
                                             </div>
@@ -569,8 +893,11 @@ if (isset($_POST['update_category'])) {
 
                                                 <div class="form-group">
 
+
                                                     <label>
+
                                                         Change Category Image
+
                                                     </label>
 
 
@@ -581,12 +908,15 @@ if (isset($_POST['update_category'])) {
                                                         accept=".jpg,.jpeg,.png,.webp">
 
 
-                                                    <small class="text-muted">
+                                                    <small
+                                                        class="text-muted">
 
-                                                        Leave empty if you don't
-                                                        want to change the image.
+                                                        Leave empty if you
+                                                        don't want to change
+                                                        the image.
 
                                                     </small>
+
 
                                                 </div>
 
@@ -603,11 +933,14 @@ if (isset($_POST['update_category'])) {
 
                                         <div class="form-group">
 
+
                                             <a
                                                 href="category-management.php"
                                                 class="btn btn-secondary">
 
-                                                <i class="fa fa-arrow-left"></i>
+                                                <i
+                                                    class="fa fa-arrow-left">
+                                                </i>
 
                                                 Back
 
@@ -620,11 +953,14 @@ if (isset($_POST['update_category'])) {
                                                 value="1"
                                                 class="btn btn-primary">
 
-                                                <i class="fa fa-save"></i>
+                                                <i
+                                                    class="fa fa-save">
+                                                </i>
 
                                                 Update Category
 
                                             </button>
+
 
                                         </div>
 
@@ -635,6 +971,7 @@ if (isset($_POST['update_category'])) {
 
                             </div>
 
+
                         </div>
 
                     </div>
@@ -643,8 +980,8 @@ if (isset($_POST['update_category'])) {
 
 
                 <!-- =================================================
-                 FOOTER
-            ================================================== -->
+                     FOOTER
+                ================================================== -->
 
                 <footer>
 
@@ -654,6 +991,7 @@ if (isset($_POST['update_category'])) {
                         Bootstrap Admin Template
 
                     </div>
+
 
                     <div class="clearfix"></div>
 
@@ -668,28 +1006,39 @@ if (isset($_POST['update_category'])) {
 
 
     <!-- =========================================================
-     JAVASCRIPT
-========================================================= -->
+         JAVASCRIPT
+    ========================================================== -->
+
+
+    <!-- jQuery -->
 
     <script
         src="assets/vendors/jquery/dist/jquery.min.js">
     </script>
 
 
+    <!-- Bootstrap -->
+
     <script
         src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
     </script>
 
+
+    <!-- FastClick -->
 
     <script
         src="assets/vendors/fastclick/lib/fastclick.js">
     </script>
 
 
+    <!-- NProgress -->
+
     <script
         src="assets/vendors/nprogress/nprogress.js">
     </script>
 
+
+    <!-- Custom -->
 
     <script
         src="assets/js/custom.min.js">

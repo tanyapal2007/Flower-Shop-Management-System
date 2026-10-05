@@ -1,140 +1,176 @@
 <?php
-session_start();
-include "../config/database.php";
 
-include "../config/database.php";
+if (session_status() === PHP_SESSION_NONE) {
+  session_start();
+}
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   CHECK LOGIN
+========================================================= */
 
 $login_user_id = $_SESSION['user_id'] ?? 0;
 
-if ($login_user_id == 0) {
+if (!$login_user_id) {
   header("Location: ../login.php");
   exit;
 }
-$admin_check_sql = "SELECT
-                        user_id,
-                        name,
-                        phone,
-                        role,
-                        status,
-                        created_at
-                    FROM `user`
-                    WHERE user_id = '$login_user_id'
-                    LIMIT 1";
-
-$admin_check_result = mysqli_query(
-  $conn,
-  $admin_check_sql
-);
 
 
-if (!$admin_check_result) {
+/* =========================================================
+   CHECK ADMIN
+========================================================= */
 
-  die("Admin Check Error: " .
-    mysqli_error($conn));
-}
+$admin_check_sql = "
+    SELECT
+        user_id,
+        name,
+        phone,
+        role,
+        status,
+        created_at
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+";
+
+$admin_check_stmt = $conn->prepare($admin_check_sql);
+
+$admin_check_stmt->execute([
+  ':user_id' => $login_user_id
+]);
+
+$admin = $admin_check_stmt->fetch(PDO::FETCH_ASSOC);
 
 
-if (mysqli_num_rows($admin_check_result) == 0) {
+/* =========================================================
+   ADMIN VALIDATION
+========================================================= */
 
+if (
+  !$admin ||
+  $admin['role'] !== 'admin' ||
+  (int)$admin['status'] !== 1
+) {
   header("Location: ../index.php");
   exit;
 }
 
 
-$admin = mysqli_fetch_assoc(
-  $admin_check_result
-);
-
-
-// If user is not admin
-
-if ($admin['role'] != 'admin') {
-
-  header("Location: ../index.php");
-  exit;
-}
 /* =========================================================
    DELETE PRODUCT
 ========================================================= */
 
 if (isset($_GET['delete'])) {
 
-  $product_id = intval($_GET['delete']);
+  $product_id = (int)$_GET['delete'];
 
   if ($product_id > 0) {
 
-    $delete_sql = "DELETE FROM products 
-                       WHERE product_id = $product_id";
+    try {
 
-    if (mysqli_query($conn, $delete_sql)) {
+      $delete_sql = "
+                DELETE FROM products
+                WHERE product_id = :product_id
+            ";
+
+      $delete_stmt = $conn->prepare($delete_sql);
+
+      $delete_stmt->execute([
+        ':product_id' => $product_id
+      ]);
 
       header("Location: products.php");
       exit;
-    } else {
+    } catch (PDOException $e) {
 
-      echo "Delete Error: " . mysqli_error($conn);
+      die("Delete Error: " .
+        htmlspecialchars($e->getMessage()));
     }
   }
 }
 
 
 /* =========================================================
-   FETCH PRODUCTS
+   FETCH PRODUCTS + LATEST PRICE
 ========================================================= */
 
-/*
-   LEFT JOIN is used because a product may not have price yet.
 
-   Latest price is fetched using a subquery.
-*/
+/* =========================================================
+   FETCH PRODUCTS + LATEST PRICE
+========================================================= */
 
 $sql = "
-SELECT 
-    p.product_id,
-    p.product_name,
-    p.product_description,
-    p.product_code,
-    p.stock_quantity,
-    p.status,
-    p.created_at,
+    SELECT
+        p.product_id,
+        p.product_name,
+        p.product_description,
+        p.product_code,
+        p.stock_quantity,
+        p.status,
+        p.created_at,
 
-    ps.subcategory_name,
+        ps.subcategory_name,
 
-    pc.category_name,
+        pc.category_name,
 
-    pp.original_price,
-    pp.discount_percentage,
-    pp.selling_price,
-    pp.start_date,
-    pp.end_date
+        pp.price_id,
+        pp.original_price,
+        pp.discount_percentage,
+        pp.selling_price,
+        pp.start_date,
+        pp.end_date
 
-FROM products p
+    FROM products p
 
-LEFT JOIN product_subcategory ps
-    ON p.subcategory_id = ps.subcategory_id
+    LEFT JOIN product_subcategory ps
+        ON p.subcategory_id = ps.subcategory_id
 
-LEFT JOIN product_category pc
-    ON ps.category_id = pc.category_id
+    LEFT JOIN product_category pc
+        ON ps.category_id = pc.category_id
 
-LEFT JOIN product_prices pp
-    ON pp.price_id = (
-        SELECT price_id
+    LEFT JOIN LATERAL
+    (
+        SELECT
+            product_prices.price_id,
+            product_prices.original_price,
+            product_prices.discount_percentage,
+            product_prices.selling_price,
+            product_prices.start_date,
+            product_prices.end_date
+
         FROM product_prices
-        WHERE product_id = p.product_id
-        ORDER BY price_id DESC
-        LIMIT 1
-    )
 
-ORDER BY p.product_id DESC
+        WHERE product_prices.product_id = p.product_id
+
+        ORDER BY product_prices.price_id DESC
+
+        LIMIT 1
+
+    ) pp
+        ON TRUE
+
+    ORDER BY p.product_id DESC
 ";
 
-$result = mysqli_query($conn, $sql);
 
-if (!$result) {
-  die("Product Query Error: " . mysqli_error($conn));
+try {
+
+  $stmt = $conn->prepare($sql);
+
+  $stmt->execute();
+
+  $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+
+  die("Product Fetch Error: " .
+    htmlspecialchars($e->getMessage()));
 }
 
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -143,40 +179,54 @@ if (!$result) {
 
   <meta charset="utf-8">
 
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta
+    http-equiv="X-UA-Compatible"
+    content="IE=edge">
 
-  <meta name="viewport"
+  <meta
+    name="viewport"
     content="width=device-width, initial-scale=1">
 
   <title>Products</title>
 
 
   <!-- Bootstrap -->
+
   <link
     href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
     rel="stylesheet">
 
+
   <!-- Font Awesome -->
+
   <link
     href="assets/vendors/font-awesome/css/font-awesome.min.css"
     rel="stylesheet">
 
+
   <!-- NProgress -->
+
   <link
     href="assets/vendors/nprogress/nprogress.css"
     rel="stylesheet">
 
+
   <!-- iCheck -->
+
   <link
     href="assets/vendors/iCheck/skins/flat/green.css"
     rel="stylesheet">
 
+
   <!-- Custom Theme -->
+
   <link
     href="assets/css/custom.min.css"
     rel="stylesheet">
 
+
   <!-- DataTables -->
+
   <link
     rel="stylesheet"
     href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap.min.css">
@@ -186,29 +236,31 @@ if (!$result) {
 
 <body class="nav-md">
 
+
   <div class="container body">
 
     <div class="main_container">
 
 
       <!-- =====================================================
-         SIDEBAR
-    ====================================================== -->
+             SIDEBAR
+        ====================================================== -->
 
       <?php include 'sidebar.php'; ?>
 
 
       <!-- =====================================================
-         RIGHT CONTENT
-    ====================================================== -->
+             RIGHT CONTENT
+        ====================================================== -->
 
-      <div class="right_col"
+      <div
+        class="right_col"
         role="main">
 
 
         <!-- =================================================
-             TOP NAVIGATION
-        ================================================== -->
+                 TOP NAVIGATION
+            ================================================== -->
 
         <div class="top_nav">
 
@@ -231,7 +283,8 @@ if (!$result) {
 
                 <li>
 
-                  <a href="javascript:;"
+                  <a
+                    href="javascript:;"
                     class="user-profile dropdown-toggle"
                     data-toggle="dropdown">
 
@@ -239,36 +292,50 @@ if (!$result) {
                       src="assets/images/img.jpg"
                       alt="">
 
-                    John Doe
+                    <?php
+                    echo htmlspecialchars(
+                      $admin['name']
+                    );
+                    ?>
 
                     <span class="fa fa-angle-down"></span>
 
                   </a>
 
 
-                  <ul class="dropdown-menu dropdown-usermenu pull-right">
+                  <ul
+                    class="dropdown-menu dropdown-usermenu pull-right">
 
                     <li>
+
                       <a href="javascript:;">
                         Profile
                       </a>
+
                     </li>
 
+
                     <li>
+
                       <a href="javascript:;">
                         Settings
                       </a>
+
                     </li>
 
+
                     <li>
+
                       <a href="javascript:;">
                         Help
                       </a>
+
                     </li>
+
 
                     <li>
 
-                      <a href="login.php">
+                      <a href="../logout.php">
 
                         <i class="fa fa-sign-out pull-right"></i>
 
@@ -292,11 +359,12 @@ if (!$result) {
 
 
         <!-- =================================================
-             PAGE CONTENT
-        ================================================== -->
+                 PAGE CONTENT
+            ================================================== -->
 
-        <div class="container-fluid"
-          style="padding: 25px;">
+        <div
+          class="container-fluid"
+          style="padding:25px;">
 
 
           <!-- PAGE HEADER -->
@@ -322,7 +390,8 @@ if (!$result) {
 
             <div class="col-md-4 text-right">
 
-              <a href="add_product.php"
+              <a
+                href="add_product.php"
                 class="btn btn-primary">
 
                 <i class="fa fa-plus"></i>
@@ -340,8 +409,8 @@ if (!$result) {
 
 
           <!-- =================================================
-                 PRODUCT CARD
-            ================================================== -->
+                     PRODUCT CARD
+                ================================================== -->
 
           <div class="x_panel">
 
@@ -373,9 +442,7 @@ if (!$result) {
                   class="table table-bordered table-hover">
 
 
-                  <!-- =================================================
-                                 TABLE HEADER
-                            ================================================== -->
+                  <!-- TABLE HEADER -->
 
                   <thead>
 
@@ -436,9 +503,7 @@ if (!$result) {
                   </thead>
 
 
-                  <!-- =================================================
-                                 TABLE BODY
-                            ================================================== -->
+                  <!-- TABLE BODY -->
 
                   <tbody>
 
@@ -446,16 +511,16 @@ if (!$result) {
 
                     $counter = 1;
 
-                    if (mysqli_num_rows($result) > 0) {
+                    if (count($products) > 0) {
 
-                      while ($product = mysqli_fetch_assoc($result)) {
+                      foreach ($products as $product) {
 
                     ?>
 
                         <tr>
 
 
-                          <!-- # -->
+                          <!-- NUMBER -->
 
                           <td>
 
@@ -499,15 +564,27 @@ if (!$result) {
 
                               <?php
 
-                              if (!empty($product['product_description'])) {
+                              if (
+                                !empty($product['product_description'])
+                              ) {
+
+                                $description =
+                                  $product['product_description'];
 
                                 echo htmlspecialchars(
                                   substr(
-                                    $product['product_description'],
+                                    $description,
                                     0,
                                     50
                                   )
                                 );
+
+                                if (
+                                  strlen($description) > 50
+                                ) {
+
+                                  echo "...";
+                                }
                               }
 
                               ?>
@@ -523,7 +600,9 @@ if (!$result) {
 
                             <?php
 
-                            if (!empty($product['category_name'])) {
+                            if (
+                              !empty($product['category_name'])
+                            ) {
 
                               echo htmlspecialchars(
                                 $product['category_name']
@@ -546,7 +625,9 @@ if (!$result) {
 
                             <?php
 
-                            if (!empty($product['subcategory_name'])) {
+                            if (
+                              !empty($product['subcategory_name'])
+                            ) {
 
                               echo htmlspecialchars(
                                 $product['subcategory_name']
@@ -569,7 +650,9 @@ if (!$result) {
 
                             <?php
 
-                            if (!empty($product['product_code'])) {
+                            if (
+                              !empty($product['product_code'])
+                            ) {
 
                               echo htmlspecialchars(
                                 $product['product_code']
@@ -591,7 +674,10 @@ if (!$result) {
                           <td>
 
                             <?php
-                            echo (int)$product['stock_quantity'];
+
+                            echo (int)
+                            $product['stock_quantity'];
+
                             ?>
 
                           </td>
@@ -604,13 +690,15 @@ if (!$result) {
                             <?php
 
                             if (
-                              $product['original_price'] !== null
+                              $product['original_price']
+                              !== null
                             ) {
 
                               echo '₹ ';
 
                               echo number_format(
-                                (float)$product['original_price'],
+                                (float)
+                                $product['original_price'],
                                 2
                               );
                             } else {
@@ -632,13 +720,15 @@ if (!$result) {
                             <?php
 
                             if (
-                              $product['selling_price'] !== null
+                              $product['selling_price']
+                              !== null
                             ) {
 
                               echo '₹ ';
 
                               echo number_format(
-                                (float)$product['selling_price'],
+                                (float)
+                                $product['selling_price'],
                                 2
                               );
                             } else {
@@ -660,20 +750,20 @@ if (!$result) {
                             <?php
 
                             if (
-                              $product['discount_percentage'] !== null
+                              $product['discount_percentage']
+                              !== null
                             ) {
 
                               echo number_format(
-                                (float)$product['discount_percentage'],
+                                (float)
+                                $product['discount_percentage'],
                                 2
                               );
 
                               echo '%';
                             } else {
 
-                              echo '<span class="text-muted">
-                                                        0%
-                                                      </span>';
+                              echo '0%';
                             }
 
                             ?>
@@ -687,18 +777,20 @@ if (!$result) {
 
                             <?php
 
-                            if ($product['status'] == 1) {
+                            if (
+                              (int)$product['status'] === 1
+                            ) {
 
                               echo '
-                                                <span class="label label-success">
-                                                    Active
-                                                </span>';
+                                                    <span class="label label-success">
+                                                        Active
+                                                    </span>';
                             } else {
 
                               echo '
-                                                <span class="label label-danger">
-                                                    Inactive
-                                                </span>';
+                                                    <span class="label label-danger">
+                                                        Inactive
+                                                    </span>';
                             }
 
                             ?>
@@ -712,7 +804,9 @@ if (!$result) {
 
                             <?php
 
-                            if (!empty($product['created_at'])) {
+                            if (
+                              !empty($product['created_at'])
+                            ) {
 
                               echo date(
                                 "d-m-Y",
@@ -729,23 +823,27 @@ if (!$result) {
 
                           <!-- ACTION -->
 
-                          <td class="text-center"
+                          <td
+                            class="text-center"
                             style="white-space:nowrap;">
 
+
+                            <!-- PRODUCT IMAGES -->
+
                             <a
-                              href="product_images.php?product_id=<?php echo $product['product_id']; ?>"
+                              href="product_images.php?product_id=<?php echo (int)$product['product_id']; ?>"
                               class="btn btn-sm btn-info"
                               title="Manage Product Images">
 
                               <i class="fa fa-image"></i>
 
-
-
                             </a>
+
+
                             <!-- EDIT -->
 
                             <a
-                              href="edit_product.php?id=<?php echo $product['product_id']; ?>"
+                              href="edit_product.php?id=<?php echo (int)$product['product_id']; ?>"
                               class="btn btn-sm btn-warning"
                               title="Edit Product">
 
@@ -757,7 +855,7 @@ if (!$result) {
                             <!-- DELETE -->
 
                             <a
-                              href="products.php?delete=<?php echo $product['product_id']; ?>"
+                              href="products.php?delete=<?php echo (int)$product['product_id']; ?>"
                               class="btn btn-sm btn-danger"
                               title="Delete Product"
                               onclick="return confirm('Are you sure you want to delete this product?');">
@@ -768,7 +866,6 @@ if (!$result) {
 
 
                           </td>
-
 
                         </tr>
 
@@ -797,7 +894,10 @@ if (!$result) {
                           </h4>
 
                           <p class="text-muted">
-                            Click "Add Product" to add your first product.
+
+                            Click "Add Product"
+                            to add your first product.
+
                           </p>
 
                           <br>
@@ -826,18 +926,14 @@ if (!$result) {
 
 
         <!-- =================================================
-             FOOTER
-        ================================================== -->
+                 FOOTER
+            ================================================== -->
 
         <footer>
 
           <div class="pull-right">
 
-            Gentelella -
-            Bootstrap Admin Template by
-            <a href="https://colorlib.com">
-              Colorlib
-            </a>
+            Fior Flower Shop - Admin Panel
 
           </div>
 
@@ -851,7 +947,6 @@ if (!$result) {
     </div>
 
   </div>
-
 
 
   <!-- =========================================================
@@ -899,7 +994,6 @@ if (!$result) {
   <script
     src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js">
   </script>
-
 
   <script
     src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap.min.js">

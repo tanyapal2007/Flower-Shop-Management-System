@@ -1,181 +1,426 @@
 <?php
-include "../config/database.php";
 
-$subcategory_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   GET SUBCATEGORY ID
+========================================================= */
+
+$subcategory_id = isset($_GET['id'])
+    ? (int) $_GET['id']
+    : 0;
+
 
 if ($subcategory_id <= 0) {
+
     header("Location: product_subcategory.php");
     exit;
 }
 
-/* GET SUBCATEGORY DATA */
-$sql = "SELECT * FROM product_subcategory WHERE subcategory_id = $subcategory_id";
-$result = mysqli_query($conn, $sql);
 
-if (!$result || mysqli_num_rows($result) == 0) {
-    header("Location: product_subcategory.php");
-    exit;
-}
-
-$subcategory = mysqli_fetch_assoc($result);
-
-/* GET CATEGORIES */
-$category_sql = "SELECT category_id, category_name
-                 FROM product_category
-                 ORDER BY category_name ASC";
-
-$category_result = mysqli_query($conn, $category_sql);
+/* =========================================================
+   VARIABLES
+========================================================= */
 
 $error_message = "";
 
-/* UPDATE SUBCATEGORY */
+
+/* =========================================================
+   FETCH SUBCATEGORY
+========================================================= */
+
+try {
+
+    $sql = "
+        SELECT *
+        FROM product_subcategory
+        WHERE subcategory_id = :subcategory_id
+    ";
+
+    $stmt = $conn->prepare($sql);
+
+    $stmt->execute([
+        ':subcategory_id' => $subcategory_id
+    ]);
+
+    $subcategory = $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+    if (!$subcategory) {
+
+        header("Location: product_subcategory.php");
+        exit;
+    }
+} catch (PDOException $e) {
+
+    die("Subcategory Fetch Error: " .
+        htmlspecialchars($e->getMessage()));
+}
+
+
+/* =========================================================
+   FETCH CATEGORIES
+========================================================= */
+
+try {
+
+    $category_sql = "
+        SELECT
+            category_id,
+            category_name
+
+        FROM product_category
+
+        ORDER BY category_name ASC
+    ";
+
+    $category_stmt = $conn->prepare($category_sql);
+
+    $category_stmt->execute();
+
+    $categories = $category_stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+
+    die("Category Fetch Error: " .
+        htmlspecialchars($e->getMessage()));
+}
+
+
+/* =========================================================
+   UPDATE SUBCATEGORY
+========================================================= */
+
 if (isset($_POST['update_subcategory'])) {
 
-    $subcategory_id = intval($_POST['subcategory_id']);
-    $category_id = intval($_POST['category_id']);
 
-    $subcategory_name = mysqli_real_escape_string(
-        $conn,
-        trim($_POST['subcategory_name'])
+    /* =====================================================
+       GET FORM DATA
+    ===================================================== */
+
+    $subcategory_id = isset($_POST['subcategory_id'])
+        ? (int) $_POST['subcategory_id']
+        : 0;
+
+
+    $category_id = isset($_POST['category_id'])
+        ? (int) $_POST['category_id']
+        : 0;
+
+
+    $subcategory_name = trim(
+        $_POST['subcategory_name'] ?? ''
     );
 
-    $subcategory_description = mysqli_real_escape_string(
-        $conn,
-        trim($_POST['subcategory_description'])
+
+    $subcategory_description = trim(
+        $_POST['subcategory_description'] ?? ''
     );
 
-    $status = intval($_POST['status']);
 
-    /* VALIDATION */
+    $status = isset($_POST['status'])
+        ? (int) $_POST['status']
+        : 1;
+
+
+    /* =====================================================
+       VALIDATION
+    ===================================================== */
 
     if ($category_id <= 0) {
 
         $error_message = "Please select category.";
-    } elseif ($subcategory_name == "") {
+    } elseif ($subcategory_name === '') {
 
         $error_message = "Subcategory name is required.";
+    } elseif ($subcategory_id <= 0) {
+
+        $error_message = "Invalid subcategory.";
     } else {
 
-        /* CHECK DUPLICATE SUBCATEGORY */
 
-        $check_sql = "SELECT subcategory_id
-                      FROM product_subcategory
-                      WHERE subcategory_name = '$subcategory_name'
-                      AND subcategory_id != $subcategory_id";
+        /* =================================================
+           CHECK DUPLICATE SUBCATEGORY
+        ================================================= */
 
-        $check_result = mysqli_query($conn, $check_sql);
+        try {
 
-        if ($check_result && mysqli_num_rows($check_result) > 0) {
+            $check_sql = "
+                SELECT subcategory_id
 
-            $error_message = "This subcategory already exists.";
-        } else {
+                FROM product_subcategory
 
-            /* OLD IMAGE */
+                WHERE LOWER(subcategory_name) = LOWER(:subcategory_name)
 
-            $subcategory_image = $subcategory['subcategory_image'];
+                AND subcategory_id != :subcategory_id
 
-            /* NEW IMAGE */
+                LIMIT 1
+            ";
+
+
+            $check_stmt = $conn->prepare($check_sql);
+
+
+            $check_stmt->execute([
+                ':subcategory_name' => $subcategory_name,
+                ':subcategory_id' => $subcategory_id
+            ]);
+
+
+            $duplicate = $check_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+            if ($duplicate) {
+
+                $error_message =
+                    "This subcategory already exists.";
+            }
+        } catch (PDOException $e) {
+
+            $error_message =
+                "Duplicate check failed: " .
+                $e->getMessage();
+        }
+    }
+
+
+    /* =====================================================
+       IMAGE
+    ===================================================== */
+
+    if ($error_message === '') {
+
+
+        /* OLD IMAGE */
+
+        $subcategory_image =
+            $subcategory['subcategory_image'] ?? '';
+
+
+        /* =================================================
+           NEW IMAGE UPLOAD
+        ================================================= */
+
+        if (
+            isset($_FILES['subcategory_image']) &&
+            $_FILES['subcategory_image']['error'] === UPLOAD_ERR_OK
+        ) {
+
+
+            $image_name =
+                $_FILES['subcategory_image']['name'];
+
+
+            $image_tmp =
+                $_FILES['subcategory_image']['tmp_name'];
+
+
+            $extension = strtolower(
+                pathinfo(
+                    $image_name,
+                    PATHINFO_EXTENSION
+                )
+            );
+
+
+            $allowed_extensions = [
+                'jpg',
+                'jpeg',
+                'png',
+                'webp'
+            ];
+
+
+            /* =================================================
+               CHECK EXTENSION
+            ================================================= */
 
             if (
-                isset($_FILES['subcategory_image']) &&
-                $_FILES['subcategory_image']['error'] == 0
+                !in_array(
+                    $extension,
+                    $allowed_extensions,
+                    true
+                )
             ) {
 
-                $image_name = $_FILES['subcategory_image']['name'];
-                $image_tmp = $_FILES['subcategory_image']['tmp_name'];
+                $error_message =
+                    "Only JPG, JPEG, PNG and WEBP images are allowed.";
+            } else {
 
-                $extension = strtolower(
-                    pathinfo($image_name, PATHINFO_EXTENSION)
-                );
 
-                $allowed_extensions = array(
-                    "jpg",
-                    "jpeg",
-                    "png",
-                    "webp"
-                );
+                /* =================================================
+                   IMAGE FOLDER
 
-                if (!in_array($extension, $allowed_extensions)) {
+                   dashboard/edit_product_subcategory.php
+                   ↓
+                   Project/assets/images/
+                ================================================= */
 
-                    $error_message =
-                        "Only JPG, JPEG, PNG and WEBP images are allowed.";
-                } else {
+                $upload_folder =
+                    "../assets/images/";
 
-                    $upload_folder = "../../uploads/subcategories/";
 
-                    if (!is_dir($upload_folder)) {
+                /* Create folder if not exists */
 
-                        mkdir(
-                            $upload_folder,
-                            0777,
-                            true
-                        );
-                    }
+                if (!is_dir($upload_folder)) {
 
-                    $new_image_name =
-                        time() . "_" .
-                        uniqid() . "." .
-                        $extension;
+                    mkdir(
+                        $upload_folder,
+                        0777,
+                        true
+                    );
+                }
+
+
+                /* =================================================
+                   NEW IMAGE NAME
+                ================================================= */
+
+                $new_image_name =
+                    time() .
+                    "_" .
+                    uniqid() .
+                    "." .
+                    $extension;
+
+
+                $new_image_path =
+                    $upload_folder .
+                    $new_image_name;
+
+
+                /* =================================================
+                   MOVE IMAGE
+                ================================================= */
+
+                if (
+                    move_uploaded_file(
+                        $image_tmp,
+                        $new_image_path
+                    )
+                ) {
+
+
+                    /* =================================================
+                       DELETE OLD IMAGE
+
+                       Only if old image exists
+                    ================================================= */
 
                     if (
-                        move_uploaded_file(
-                            $image_tmp,
-                            $upload_folder . $new_image_name
-                        )
+                        !empty($subcategory_image)
                     ) {
 
-                        /* DELETE OLD IMAGE */
+                        $old_image_path =
+                            $upload_folder .
+                            $subcategory_image;
+
 
                         if (
-                            !empty($subcategory_image) &&
                             file_exists(
-                                $upload_folder . $subcategory_image
+                                $old_image_path
                             )
                         ) {
 
                             unlink(
-                                $upload_folder . $subcategory_image
+                                $old_image_path
                             );
                         }
-
-                        $subcategory_image = $new_image_name;
-                    } else {
-
-                        $error_message = "Image upload failed.";
                     }
-                }
-            }
 
-            /* UPDATE */
 
-            if ($error_message == "") {
+                    /* Save new image name */
 
-                $update_sql = "UPDATE product_subcategory SET
-                    category_id = $category_id,
-                    subcategory_name = '$subcategory_name',
-                    subcategory_description = '$subcategory_description',
-                    subcategory_image = '$subcategory_image',
-                    status = $status
-                    WHERE subcategory_id = $subcategory_id";
-
-                if (mysqli_query($conn, $update_sql)) {
-
-                    header(
-                        "Location: product_subcategory.php?updated=1"
-                    );
-
-                    exit;
+                    $subcategory_image =
+                        $new_image_name;
                 } else {
 
-                    $error_message = mysqli_error($conn);
+                    $error_message =
+                        "Image upload failed.";
                 }
             }
         }
     }
 
-    /* KEEP ENTERED DATA IF ERROR */
 
-    if ($error_message != "") {
+    /* =====================================================
+       UPDATE DATABASE
+    ===================================================== */
+
+    if ($error_message === '') {
+
+
+        try {
+
+
+            $update_sql = "
+                UPDATE product_subcategory
+
+                SET
+                    category_id = :category_id,
+                    subcategory_name = :subcategory_name,
+                    subcategory_description = :subcategory_description,
+                    subcategory_image = :subcategory_image,
+                    status = :status
+
+                WHERE subcategory_id = :subcategory_id
+            ";
+
+
+            $update_stmt =
+                $conn->prepare($update_sql);
+
+
+            $update_stmt->execute([
+
+                ':category_id' =>
+                $category_id,
+
+                ':subcategory_name' =>
+                $subcategory_name,
+
+                ':subcategory_description' =>
+                $subcategory_description,
+
+                ':subcategory_image' =>
+                $subcategory_image,
+
+                ':status' =>
+                $status,
+
+                ':subcategory_id' =>
+                $subcategory_id
+
+            ]);
+
+
+            /* =================================================
+               SUCCESS
+            ================================================= */
+
+            header(
+                "Location: product_subcategory.php?updated=1"
+            );
+
+            exit;
+        } catch (PDOException $e) {
+
+            $error_message =
+                "Update failed: " .
+                $e->getMessage();
+        }
+    }
+
+
+    /* =====================================================
+       KEEP ENTERED DATA IF ERROR
+    ===================================================== */
+
+    if ($error_message !== '') {
 
         $subcategory['category_id'] =
             $_POST['category_id'] ?? '';
@@ -190,6 +435,7 @@ if (isset($_POST['update_subcategory'])) {
             $_POST['status'] ?? 1;
     }
 }
+
 ?>
 
 <!DOCTYPE html>
@@ -199,52 +445,90 @@ if (isset($_POST['update_subcategory'])) {
 
     <meta charset="utf-8">
 
-    <meta http-equiv="X-UA-Compatible"
+    <meta
+        http-equiv="X-UA-Compatible"
         content="IE=edge">
 
-    <meta name="viewport"
+    <meta
+        name="viewport"
         content="width=device-width, initial-scale=1">
 
     <title>Edit Product Subcategory</title>
 
-    <link href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
+
+    <!-- Bootstrap -->
+
+    <link
+        href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/font-awesome/css/font-awesome.min.css"
+
+    <!-- Font Awesome -->
+
+    <link
+        href="assets/vendors/font-awesome/css/font-awesome.min.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/nprogress/nprogress.css"
+
+    <!-- NProgress -->
+
+    <link
+        href="assets/vendors/nprogress/nprogress.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/iCheck/skins/flat/green.css"
+
+    <!-- iCheck -->
+
+    <link
+        href="assets/vendors/iCheck/skins/flat/green.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/pnotify/dist/pnotify.css"
+
+    <!-- PNotify -->
+
+    <link
+        href="assets/vendors/pnotify/dist/pnotify.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/pnotify/dist/pnotify.buttons.css"
+    <link
+        href="assets/vendors/pnotify/dist/pnotify.buttons.css"
         rel="stylesheet">
 
-    <link href="assets/vendors/pnotify/dist/pnotify.nonblock.css"
+    <link
+        href="assets/vendors/pnotify/dist/pnotify.nonblock.css"
         rel="stylesheet">
 
-    <link href="assets/css/custom.min.css"
+
+    <!-- Custom -->
+
+    <link
+        href="assets/css/custom.min.css"
         rel="stylesheet">
 
-    <link href="assets/css/custom-popup.css"
+    <link
+        href="assets/css/custom-popup.css"
         rel="stylesheet">
 
 </head>
 
+
 <body class="nav-md">
+
 
     <div class="container body">
 
         <div class="main_container">
 
+
+            <!-- SIDEBAR -->
+
             <?php include 'sidebar.php'; ?>
 
-            <div class="right_col" role="main">
+
+            <div
+                class="right_col"
+                role="main">
+
 
                 <!-- TOP NAVIGATION -->
 
@@ -270,9 +554,11 @@ if (isset($_POST['update_subcategory'])) {
 
                 </div>
 
+
                 <!-- PAGE CONTENT -->
 
                 <div class="container-fluid py-4">
+
 
                     <!-- HEADER -->
 
@@ -282,6 +568,7 @@ if (isset($_POST['update_subcategory'])) {
 
                             <div class="page-title">
 
+
                                 <div class="title_left">
 
                                     <h3>
@@ -290,9 +577,11 @@ if (isset($_POST['update_subcategory'])) {
 
                                 </div>
 
+
                                 <div class="title_right">
 
-                                    <a href="product_subcategory.php"
+                                    <a
+                                        href="product_subcategory.php"
                                         class="btn btn-secondary">
 
                                         <i class="fa fa-arrow-left"></i>
@@ -303,27 +592,34 @@ if (isset($_POST['update_subcategory'])) {
 
                                 </div>
 
+
                             </div>
 
                         </div>
 
                     </div>
 
+
                     <!-- ERROR -->
 
-                    <?php if ($error_message != "") { ?>
+                    <?php if ($error_message !== '') { ?>
 
                         <div class="alert alert-danger">
 
                             <i class="fa fa-times-circle"></i>
 
                             <?php
-                            echo htmlspecialchars($error_message);
+
+                            echo htmlspecialchars(
+                                $error_message
+                            );
+
                             ?>
 
                         </div>
 
                     <?php } ?>
+
 
                     <!-- FORM -->
 
@@ -332,6 +628,7 @@ if (isset($_POST['update_subcategory'])) {
                         <div class="col-md-12">
 
                             <div class="x_panel">
+
 
                                 <div class="x_title">
 
@@ -343,32 +640,48 @@ if (isset($_POST['update_subcategory'])) {
 
                                 </div>
 
+
                                 <div class="x_content">
 
-                                    <form method="POST"
+
+                                    <form
+                                        method="POST"
                                         enctype="multipart/form-data">
+
+
+                                        <!-- SUBCATEGORY ID -->
 
                                         <input
                                             type="hidden"
                                             name="subcategory_id"
                                             value="<?php
-                                                    echo $subcategory['subcategory_id'];
+
+                                                    echo htmlspecialchars(
+                                                        $subcategory['subcategory_id']
+                                                    );
+
                                                     ?>">
+
 
                                         <div class="row">
 
-                                            <!-- CATEGORY -->
+
+                                            <!-- =================================
+                                                 CATEGORY
+                                            ================================== -->
 
                                             <div class="col-md-6 mb-3">
 
                                                 <label class="form-label">
 
                                                     Category
+
                                                     <span class="text-danger">
                                                         *
                                                     </span>
 
                                                 </label>
+
 
                                                 <select
                                                     name="category_id"
@@ -376,59 +689,61 @@ if (isset($_POST['update_subcategory'])) {
                                                     required>
 
                                                     <option value="">
+
                                                         Select Category
+
                                                     </option>
 
-                                                    <?php
 
-                                                    if ($category_result) {
+                                                    <?php foreach (
+                                                        $categories
+                                                        as $category
+                                                    ) { ?>
 
-                                                        while (
-                                                            $category =
-                                                            mysqli_fetch_assoc(
-                                                                $category_result
+
+                                                        <?php
+
+                                                        $selected =
+                                                            (
+                                                                (int)$category['category_id']
+                                                                ===
+                                                                (int)$subcategory['category_id']
                                                             )
-                                                        ) {
+                                                            ? 'selected'
+                                                            : '';
 
-                                                            $selected = "";
+                                                        ?>
 
-                                                            if (
-                                                                $category['category_id']
-                                                                ==
-                                                                $subcategory['category_id']
-                                                            ) {
 
-                                                                $selected = "selected";
-                                                            }
+                                                        <option
+                                                            value="<?php
+                                                                    echo (int)
+                                                                    $category['category_id'];
+                                                                    ?>"
+                                                            <?php echo $selected; ?>>
 
-                                                    ?>
+                                                            <?php
 
-                                                            <option
-                                                                value="<?php
-                                                                        echo $category['category_id'];
-                                                                        ?>"
-                                                                <?php echo $selected; ?>>
+                                                            echo htmlspecialchars(
+                                                                $category['category_name']
+                                                            );
 
-                                                                <?php
-                                                                echo htmlspecialchars(
-                                                                    $category['category_name']
-                                                                );
-                                                                ?>
+                                                            ?>
 
-                                                            </option>
+                                                        </option>
 
-                                                    <?php
 
-                                                        }
-                                                    }
+                                                    <?php } ?>
 
-                                                    ?>
 
                                                 </select>
 
                                             </div>
 
-                                            <!-- STATUS -->
+
+                                            <!-- =================================
+                                                 STATUS
+                                            ================================== -->
 
                                             <div class="col-md-6 mb-3">
 
@@ -438,6 +753,7 @@ if (isset($_POST['update_subcategory'])) {
 
                                                 </label>
 
+
                                                 <select
                                                     name="status"
                                                     class="form-control">
@@ -445,25 +761,32 @@ if (isset($_POST['update_subcategory'])) {
                                                     <option
                                                         value="1"
                                                         <?php
+
                                                         echo (
-                                                            $subcategory['status'] == 1
+                                                            (int)$subcategory['status']
+                                                            === 1
                                                         )
-                                                            ? "selected"
-                                                            : "";
+                                                            ? 'selected'
+                                                            : '';
+
                                                         ?>>
 
                                                         Active
 
                                                     </option>
 
+
                                                     <option
                                                         value="0"
                                                         <?php
+
                                                         echo (
-                                                            $subcategory['status'] == 0
+                                                            (int)$subcategory['status']
+                                                            === 0
                                                         )
-                                                            ? "selected"
-                                                            : "";
+                                                            ? 'selected'
+                                                            : '';
+
                                                         ?>>
 
                                                         Inactive
@@ -474,7 +797,10 @@ if (isset($_POST['update_subcategory'])) {
 
                                             </div>
 
-                                            <!-- SUBCATEGORY NAME -->
+
+                                            <!-- =================================
+                                                 SUBCATEGORY NAME
+                                            ================================== -->
 
                                             <div class="col-md-6 mb-3">
 
@@ -488,21 +814,27 @@ if (isset($_POST['update_subcategory'])) {
 
                                                 </label>
 
+
                                                 <input
                                                     type="text"
                                                     name="subcategory_name"
                                                     class="form-control"
                                                     value="<?php
+
                                                             echo htmlspecialchars(
                                                                 $subcategory['subcategory_name']
                                                             );
+
                                                             ?>"
                                                     placeholder="Enter subcategory name"
                                                     required>
 
                                             </div>
 
-                                            <!-- IMAGE -->
+
+                                            <!-- =================================
+                                                 IMAGE
+                                            ================================== -->
 
                                             <div class="col-md-6 mb-3">
 
@@ -512,11 +844,13 @@ if (isset($_POST['update_subcategory'])) {
 
                                                 </label>
 
+
                                                 <input
                                                     type="file"
                                                     name="subcategory_image"
                                                     class="form-control"
                                                     accept=".jpg,.jpeg,.png,.webp">
+
 
                                                 <small class="text-muted">
 
@@ -525,33 +859,46 @@ if (isset($_POST['update_subcategory'])) {
 
                                                 </small>
 
+
+                                                <!-- CURRENT IMAGE -->
+
                                                 <?php
+
                                                 if (
                                                     !empty($subcategory['subcategory_image'])
                                                 ) {
+
                                                 ?>
 
                                                     <div class="mt-3">
 
                                                         <img
-                                                            src="../../uploads/subcategories/<?php
-                                                                                                echo htmlspecialchars(
-                                                                                                    $subcategory['subcategory_image']
-                                                                                                );
-                                                                                                ?>"
+                                                            src="../assets/images/<?php
+
+                                                                                    echo htmlspecialchars(
+                                                                                        $subcategory['subcategory_image']
+                                                                                    );
+
+                                                                                    ?>"
                                                             width="100"
                                                             height="100"
-                                                            style="object-fit:cover;border-radius:8px;">
+                                                            style="
+                                                                object-fit:cover;
+                                                                border-radius:8px;
+                                                                border:1px solid #ddd;
+                                                            ">
 
                                                     </div>
 
-                                                <?php
-                                                }
-                                                ?>
+                                                <?php } ?>
+
 
                                             </div>
 
-                                            <!-- DESCRIPTION -->
+
+                                            <!-- =================================
+                                                 DESCRIPTION
+                                            ================================== -->
 
                                             <div class="col-md-12 mb-3">
 
@@ -561,23 +908,32 @@ if (isset($_POST['update_subcategory'])) {
 
                                                 </label>
 
+
                                                 <textarea
                                                     name="subcategory_description"
                                                     class="form-control"
                                                     rows="5"
                                                     placeholder="Enter subcategory description"><?php
+
                                                                                                 echo htmlspecialchars(
-                                                                                                    $subcategory['subcategory_description']
+                                                                                                    $subcategory['subcategory_description'] ?? ''
                                                                                                 );
+
                                                                                                 ?></textarea>
 
                                             </div>
 
+
                                         </div>
 
-                                        <!-- BUTTONS -->
 
-                                        <div class="border-top pt-4 mt-3">
+                                        <!-- =================================
+                                             BUTTONS
+                                        ================================== -->
+
+                                        <div
+                                            class="border-top pt-4 mt-3">
+
 
                                             <a
                                                 href="product_subcategory.php"
@@ -588,6 +944,7 @@ if (isset($_POST['update_subcategory'])) {
                                                 Cancel
 
                                             </a>
+
 
                                             <button
                                                 type="submit"
@@ -601,11 +958,15 @@ if (isset($_POST['update_subcategory'])) {
 
                                             </button>
 
+
                                         </div>
+
 
                                     </form>
 
+
                                 </div>
+
 
                             </div>
 
@@ -613,7 +974,9 @@ if (isset($_POST['update_subcategory'])) {
 
                     </div>
 
+
                 </div>
+
 
                 <!-- FOOTER -->
 
@@ -629,27 +992,55 @@ if (isset($_POST['update_subcategory'])) {
 
                 </footer>
 
+
             </div>
 
         </div>
 
     </div>
 
-    <script src="assets/vendors/jquery/dist/jquery.min.js"></script>
 
-    <script src="assets/vendors/bootstrap/dist/js/bootstrap.min.js"></script>
+    <!-- JAVASCRIPT -->
 
-    <script src="assets/vendors/nprogress/nprogress.js"></script>
+    <script
+        src="assets/vendors/jquery/dist/jquery.min.js">
+    </script>
 
-    <script src="assets/vendors/pnotify/dist/pnotify.js"></script>
 
-    <script src="assets/vendors/pnotify/dist/pnotify.buttons.js"></script>
+    <script
+        src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
+    </script>
 
-    <script src="assets/vendors/pnotify/dist/pnotify.nonblock.js"></script>
 
-    <script src="assets/js/custom.min.js"></script>
+    <script
+        src="assets/vendors/nprogress/nprogress.js">
+    </script>
 
-    <script src="assets/js/custom-popup.js"></script>
+
+    <script
+        src="assets/vendors/pnotify/dist/pnotify.js">
+    </script>
+
+
+    <script
+        src="assets/vendors/pnotify/dist/pnotify.buttons.js">
+    </script>
+
+
+    <script
+        src="assets/vendors/pnotify/dist/pnotify.nonblock.js">
+    </script>
+
+
+    <script
+        src="assets/js/custom.min.js">
+    </script>
+
+
+    <script
+        src="assets/js/custom-popup.js">
+    </script>
+
 
 </body>
 

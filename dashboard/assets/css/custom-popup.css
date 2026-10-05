@@ -1,6 +1,28 @@
 /* =========================================================
    GLOBAL CUSTOM POPUP
 ========================================================= */
+.profile_pic {
+    width: 70px !important;
+    height: 70px !important;
+}
+
+.profile_pic .profile_img {
+    width: 60px !important;
+    height: 60px !important;
+    object-fit: cover !important;
+    border-radius: 50% !important;
+}
+.profile_pic {
+    width: 70px !important;
+    height: 70px !important;
+}
+
+.profile_pic .profile_img {
+    width: 65px !important;
+    height: 65px !important;
+    object-fit: cover !important;
+    border-radius: 50% !important;
+}
 
 .custom-popup-overlay {
     position: fixed;

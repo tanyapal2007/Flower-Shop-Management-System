@@ -1,162 +1,397 @@
 <?php
 
-include "../config/database.php";
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   CHECK LOGIN
+========================================================= */
+
+$login_user_id = $_SESSION['user_id'] ?? 0;
+
+if (!$login_user_id) {
+    header("Location: ../login.php");
+    exit;
+}
+
+
+/* =========================================================
+   CHECK ADMIN
+========================================================= */
+
+$admin_check_sql = "
+    SELECT
+        user_id,
+        name,
+        phone,
+        role,
+        status,
+        created_at
+    FROM users
+    WHERE user_id = :user_id
+    LIMIT 1
+";
+
+$admin_check_stmt = $conn->prepare($admin_check_sql);
+
+$admin_check_stmt->execute([
+    ':user_id' => $login_user_id
+]);
+
+$admin = $admin_check_stmt->fetch(PDO::FETCH_ASSOC);
+
+
+if (
+    !$admin ||
+    $admin['role'] !== 'admin' ||
+    (int)$admin['status'] !== 1
+) {
+    header("Location: ../index.php");
+    exit;
+}
+
+
+/* =========================================================
+   VARIABLES
+========================================================= */
+
+$error_message = "";
+
+$product_name = "";
+$product_description = "";
+$product_code = "";
+$brand_name = "";
+$color = "";
+$size = "";
+$material = "";
+
+$subcategory_id = 0;
+$stock_quantity = 0;
+$status = 1;
+
+
+/* =========================================================
+   MAKE SURE PRODUCT EXTRA COLUMNS EXIST
+========================================================= */
+
+try {
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS brand_name VARCHAR(100)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS color VARCHAR(100)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS size VARCHAR(100)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS material VARCHAR(100)
+    ");
+} catch (PDOException $e) {
+
+    $error_message =
+        "Database Error: " .
+        $e->getMessage();
+}
+
 
 /* =========================================================
    ADD PRODUCT
 ========================================================= */
 
-if (isset($_POST['add_product'])) {
+if (
+    isset($_POST['add_product']) &&
+    empty($error_message)
+) {
 
-    $subcategory_id = intval($_POST['subcategory_id'] ?? 0);
+    /* =====================================================
+       GET FORM DATA
+    ====================================================== */
 
-    $product_name = mysqli_real_escape_string(
-        $conn,
+    $subcategory_id = (int)(
+        $_POST['subcategory_id'] ?? 0
+    );
+
+    $product_name = trim(
         $_POST['product_name'] ?? ''
     );
 
-    $product_description = mysqli_real_escape_string(
-        $conn,
+    $product_description = trim(
         $_POST['product_description'] ?? ''
     );
 
-    $product_code = mysqli_real_escape_string(
-        $conn,
+    $product_code = trim(
         $_POST['product_code'] ?? ''
     );
 
-    $stock_quantity = intval(
+    $stock_quantity = (int)(
         $_POST['stock_quantity'] ?? 0
     );
 
-    $status = intval(
+    $status = (int)(
         $_POST['status'] ?? 1
     );
 
-    $brand_name = mysqli_real_escape_string(
-        $conn,
+    $brand_name = trim(
         $_POST['brand_name'] ?? ''
     );
 
-    $color = mysqli_real_escape_string(
-        $conn,
+    $color = trim(
         $_POST['color'] ?? ''
     );
 
-    $size = mysqli_real_escape_string(
-        $conn,
+    $size = trim(
         $_POST['size'] ?? ''
     );
 
-    $material = mysqli_real_escape_string(
-        $conn,
+    $material = trim(
         $_POST['material'] ?? ''
     );
 
 
-    /* =========================================================
+    /* =====================================================
        VALIDATION
-    ========================================================= */
+    ====================================================== */
 
     if ($subcategory_id <= 0) {
 
-        $error_message = "Please select a subcategory.";
-    } elseif (empty($product_name)) {
+        $error_message =
+            "Please select a subcategory.";
+    } elseif ($product_name === '') {
 
-        $error_message = "Please enter product name.";
+        $error_message =
+            "Please enter product name.";
+    } elseif ($stock_quantity < 0) {
+
+        $error_message =
+            "Stock quantity cannot be negative.";
+    } elseif (!in_array($status, [0, 1], true)) {
+
+        $error_message =
+            "Invalid product status.";
     } else {
 
-        /* =====================================================
-           INSERT PRODUCT
-        ====================================================== */
+        try {
 
-        $check_code = mysqli_query($conn, "SELECT product_id FROM products WHERE product_code = '$product_code'");
+            /* =============================================
+               CHECK SUBCATEGORY
+            ============================================== */
 
-        if (mysqli_num_rows($check_code) > 0) {
-            echo "<script>
-        document.addEventListener('DOMContentLoaded', function() {
-            init_PNotify(
-                'This product code already exists. Please enter a different product code.',
-                'error',
-                'Duplicate Product Code',
-                'fa fa-times'
-            );
-        });
-    </script>";
-        } else {
+            $subcategory_check_sql = "
+                SELECT subcategory_id
+                FROM product_subcategory
+                WHERE subcategory_id = :subcategory_id
+                AND status = 1
+                LIMIT 1
+            ";
 
-            $sql = "INSERT INTO products
-    (
-        subcategory_id,
-        product_name,
-        product_description,
-        product_code,
-        stock_quantity,
-        status,
-        brand_name,
-        color,
-        size,
-        material
-    )
-    VALUES
-    (
-        '$subcategory_id',
-        '$product_name',
-        '$product_description',
-        '$product_code',
-        '$stock_quantity',
-        '$status',
-        '$brand_name',
-        '$color',
-        '$size',
-        '$material'
-    )";
+            $subcategory_check_stmt =
+                $conn->prepare(
+                    $subcategory_check_sql
+                );
 
-            if (mysqli_query($conn, $sql)) {
+            $subcategory_check_stmt->execute([
+                ':subcategory_id' =>
+                $subcategory_id
+            ]);
 
-                $product_id = mysqli_insert_id($conn);
+            $subcategory_exists =
+                $subcategory_check_stmt->fetch(
+                    PDO::FETCH_ASSOC
+                );
 
-                header("Location: add_price.php?product_id=" . $product_id);
-                exit;
+
+            if (!$subcategory_exists) {
+
+                $error_message =
+                    "Selected subcategory is not available.";
             } else {
 
-                echo "<script>
-            document.addEventListener('DOMContentLoaded', function() {
-                init_PNotify(
-                    'Product could not be added.',
-                    'error',
-                    'Add Product Failed',
-                    'fa fa-times'
-                );
-            });
-        </script>";
+                /* =========================================
+                   CHECK PRODUCT CODE
+                ========================================== */
+
+                if ($product_code !== '') {
+
+                    $check_code_sql = "
+                        SELECT product_id
+                        FROM products
+                        WHERE product_code = :product_code
+                        LIMIT 1
+                    ";
+
+                    $check_code_stmt =
+                        $conn->prepare(
+                            $check_code_sql
+                        );
+
+                    $check_code_stmt->execute([
+                        ':product_code' =>
+                        $product_code
+                    ]);
+
+                    $existing_product =
+                        $check_code_stmt->fetch(
+                            PDO::FETCH_ASSOC
+                        );
+
+
+                    if ($existing_product) {
+
+                        $error_message =
+                            "This product code already exists. Please enter a different product code.";
+                    }
+                }
+
+
+                /* =========================================
+                   INSERT PRODUCT
+                ========================================== */
+
+                if ($error_message === '') {
+
+                    $conn->beginTransaction();
+
+
+                    $insert_sql = "
+                        INSERT INTO products
+                        (
+                            subcategory_id,
+                            product_name,
+                            product_description,
+                            product_code,
+                            stock_quantity,
+                            status,
+                            brand_name,
+                            color,
+                            size,
+                            material
+                        )
+                        VALUES
+                        (
+                            :subcategory_id,
+                            :product_name,
+                            :product_description,
+                            :product_code,
+                            :stock_quantity,
+                            :status,
+                            :brand_name,
+                            :color,
+                            :size,
+                            :material
+                        )
+                        RETURNING product_id
+                    ";
+
+
+                    $insert_stmt =
+                        $conn->prepare(
+                            $insert_sql
+                        );
+
+
+                    $insert_stmt->execute([
+
+                        ':subcategory_id' =>
+                        $subcategory_id,
+
+                        ':product_name' =>
+                        $product_name,
+
+                        ':product_description' =>
+                        $product_description !== ''
+                            ? $product_description
+                            : null,
+
+                        ':product_code' =>
+                        $product_code !== ''
+                            ? $product_code
+                            : null,
+
+                        ':stock_quantity' =>
+                        $stock_quantity,
+
+                        ':status' =>
+                        $status,
+
+                        ':brand_name' =>
+                        $brand_name !== ''
+                            ? $brand_name
+                            : null,
+
+                        ':color' =>
+                        $color !== ''
+                            ? $color
+                            : null,
+
+                        ':size' =>
+                        $size !== ''
+                            ? $size
+                            : null,
+
+                        ':material' =>
+                        $material !== ''
+                            ? $material
+                            : null
+                    ]);
+
+
+                    /* =====================================
+                       GET PRODUCT ID
+                    ====================================== */
+
+                    $product_id =
+                        $insert_stmt->fetchColumn();
+
+
+                    if (!$product_id) {
+
+                        throw new Exception(
+                            "Product ID could not be generated."
+                        );
+                    }
+
+
+                    /* =====================================
+                       COMMIT
+                    ====================================== */
+
+                    $conn->commit();
+
+
+                    /* =====================================
+                       REDIRECT TO PRICE PAGE
+                    ====================================== */
+
+                    header(
+                        "Location: add_price.php?product_id=" .
+                            (int)$product_id
+                    );
+
+                    exit;
+                }
             }
-        }
+        } catch (Exception $e) {
 
-
-        if (mysqli_query($conn, $sql)) {
-
-            /* ================================================
-               GET INSERTED PRODUCT ID
-            ================================================= */
-
-            $product_id = mysqli_insert_id($conn);
-
-
-            /* ================================================
-               REDIRECT TO PRICE PAGE
-            ================================================= */
-
-            header(
-                "Location: add_price.php?product_id=" . $product_id
-            );
-
-            exit;
-        } else {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
 
             $error_message =
                 "Product Add Failed: " .
-                mysqli_error($conn);
+                $e->getMessage();
         }
     }
 }
@@ -175,10 +410,15 @@ $category_sql = "
     ORDER BY category_name ASC
 ";
 
-$category_result = mysqli_query(
-    $conn,
-    $category_sql
-);
+$category_stmt =
+    $conn->prepare($category_sql);
+
+$category_stmt->execute();
+
+$categories =
+    $category_stmt->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 
 /* =========================================================
@@ -195,19 +435,23 @@ $subcategory_sql = "
     ORDER BY subcategory_name ASC
 ";
 
-$subcategory_result = mysqli_query(
-    $conn,
-    $subcategory_sql
-);
+$subcategory_stmt =
+    $conn->prepare($subcategory_sql);
+
+$subcategory_stmt->execute();
+
+$subcategories =
+    $subcategory_stmt->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
     <meta charset="utf-8">
 
@@ -250,26 +494,12 @@ $subcategory_result = mysqli_query(
         rel="stylesheet">
 
 
-    <!-- PNotify -->
-
-    <!-- <link
-        href="assets/vendors/pnotify/dist/pnotify.css"
-        rel="stylesheet">
-
-    <link
-        href="assets/vendors/pnotify/dist/pnotify.buttons.css"
-        rel="stylesheet">
-
-    <link
-        href="assets/vendors/pnotify/dist/pnotify.nonblock.css"
-        rel="stylesheet"> -->
-
-
     <!-- Custom Theme -->
 
     <link
         href="assets/css/custom.min.css"
         rel="stylesheet">
+
 
     <link
         href="assets/css/custom-popup.css"
@@ -325,6 +555,7 @@ $subcategory_result = mysqli_query(
 
 <body class="nav-md">
 
+
     <div class="container body">
 
         <div class="main_container">
@@ -341,7 +572,9 @@ $subcategory_result = mysqli_query(
              RIGHT CONTENT
         ====================================================== -->
 
-            <div class="right_col" role="main">
+            <div
+                class="right_col"
+                role="main">
 
 
                 <!-- =================================================
@@ -372,14 +605,17 @@ $subcategory_result = mysqli_query(
                                     <a
                                         href="javascript:;"
                                         class="user-profile dropdown-toggle"
-                                        data-toggle="dropdown"
-                                        aria-expanded="false">
+                                        data-toggle="dropdown">
 
                                         <img
                                             src="assets/images/img.jpg"
                                             alt="">
 
-                                        John Doe
+                                        <?php
+                                        echo htmlspecialchars(
+                                            $admin['name']
+                                        );
+                                        ?>
 
                                         <span class="fa fa-angle-down"></span>
 
@@ -397,21 +633,15 @@ $subcategory_result = mysqli_query(
 
                                         </li>
 
+
                                         <li>
 
                                             <a href="javascript:;">
-
-                                                <span class="badge bg-red pull-right">
-                                                    50%
-                                                </span>
-
-                                                <span>
-                                                    Settings
-                                                </span>
-
+                                                Settings
                                             </a>
 
                                         </li>
+
 
                                         <li>
 
@@ -421,9 +651,10 @@ $subcategory_result = mysqli_query(
 
                                         </li>
 
+
                                         <li>
 
-                                            <a href="login.php">
+                                            <a href="logout.php">
 
                                                 <i class="fa fa-sign-out pull-right"></i>
 
@@ -457,16 +688,23 @@ $subcategory_result = mysqli_query(
 
                     <div
                         class="row"
-                        style="margin-top:20px; margin-bottom:20px;">
+                        style="
+                        margin-top:20px;
+                        margin-bottom:20px;
+                    ">
 
                         <div class="col-md-8">
 
                             <h3 class="page-title">
+
                                 Add Product
+
                             </h3>
 
                             <p class="page-subtitle">
+
                                 Create a new product
+
                             </p>
 
                         </div>
@@ -563,36 +801,26 @@ $subcategory_result = mysqli_query(
                                             </option>
 
 
-                                            <?php
+                                            <?php foreach (
+                                                $categories
+                                                as $category
+                                            ) { ?>
 
-                                            if ($category_result) {
+                                                <option
+                                                    value="<?php
+                                                            echo (int)
+                                                            $category['category_id'];
+                                                            ?>">
 
-                                                while (
-                                                    $category =
-                                                    mysqli_fetch_assoc(
-                                                        $category_result
-                                                    )
-                                                ) {
+                                                    <?php
+                                                    echo htmlspecialchars(
+                                                        $category['category_name']
+                                                    );
+                                                    ?>
 
-                                            ?>
+                                                </option>
 
-                                                    <option
-                                                        value="<?php echo $category['category_id']; ?>">
-
-                                                        <?php
-                                                        echo htmlspecialchars(
-                                                            $category['category_name']
-                                                        );
-                                                        ?>
-
-                                                    </option>
-
-                                            <?php
-
-                                                }
-                                            }
-
-                                            ?>
+                                            <?php } ?>
 
                                         </select>
 
@@ -631,37 +859,30 @@ $subcategory_result = mysqli_query(
                                             </option>
 
 
-                                            <?php
+                                            <?php foreach (
+                                                $subcategories
+                                                as $subcategory
+                                            ) { ?>
 
-                                            if ($subcategory_result) {
+                                                <option
+                                                    value="<?php
+                                                            echo (int)
+                                                            $subcategory['subcategory_id'];
+                                                            ?>"
+                                                    data-category="<?php
+                                                                    echo (int)
+                                                                    $subcategory['category_id'];
+                                                                    ?>">
 
-                                                while (
-                                                    $subcategory =
-                                                    mysqli_fetch_assoc(
-                                                        $subcategory_result
-                                                    )
-                                                ) {
+                                                    <?php
+                                                    echo htmlspecialchars(
+                                                        $subcategory['subcategory_name']
+                                                    );
+                                                    ?>
 
-                                            ?>
+                                                </option>
 
-                                                    <option
-                                                        value="<?php echo $subcategory['subcategory_id']; ?>"
-                                                        data-category="<?php echo $subcategory['category_id']; ?>">
-
-                                                        <?php
-                                                        echo htmlspecialchars(
-                                                            $subcategory['subcategory_name']
-                                                        );
-                                                        ?>
-
-                                                    </option>
-
-                                            <?php
-
-                                                }
-                                            }
-
-                                            ?>
+                                            <?php } ?>
 
                                         </select>
 
@@ -694,6 +915,11 @@ $subcategory_result = mysqli_query(
                                             name="product_name"
                                             class="form-control"
                                             placeholder="Enter product name"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $product_name
+                                                    );
+                                                    ?>"
                                             required>
 
                                     </div>
@@ -720,7 +946,12 @@ $subcategory_result = mysqli_query(
                                             type="text"
                                             name="product_code"
                                             class="form-control"
-                                            placeholder="Enter product code">
+                                            placeholder="Enter product code"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $product_code
+                                                    );
+                                                    ?>">
 
                                     </div>
 
@@ -746,7 +977,12 @@ $subcategory_result = mysqli_query(
                                             type="text"
                                             name="brand_name"
                                             class="form-control"
-                                            placeholder="Enter brand name">
+                                            placeholder="Enter brand name"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $brand_name
+                                                    );
+                                                    ?>">
 
                                     </div>
 
@@ -772,7 +1008,12 @@ $subcategory_result = mysqli_query(
                                             type="text"
                                             name="color"
                                             class="form-control"
-                                            placeholder="Enter color">
+                                            placeholder="Enter color"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $color
+                                                    );
+                                                    ?>">
 
                                     </div>
 
@@ -798,7 +1039,12 @@ $subcategory_result = mysqli_query(
                                             type="text"
                                             name="size"
                                             class="form-control"
-                                            placeholder="Enter size">
+                                            placeholder="Enter size"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $size
+                                                    );
+                                                    ?>">
 
                                     </div>
 
@@ -824,7 +1070,12 @@ $subcategory_result = mysqli_query(
                                             type="text"
                                             name="material"
                                             class="form-control"
-                                            placeholder="Enter material">
+                                            placeholder="Enter material"
+                                            value="<?php
+                                                    echo htmlspecialchars(
+                                                        $material
+                                                    );
+                                                    ?>">
 
                                     </div>
 
@@ -851,7 +1102,10 @@ $subcategory_result = mysqli_query(
                                             name="stock_quantity"
                                             class="form-control"
                                             min="0"
-                                            value="0"
+                                            value="<?php
+                                                    echo (int)
+                                                    $stock_quantity;
+                                                    ?>"
                                             placeholder="Enter stock quantity">
 
                                     </div>
@@ -878,12 +1132,28 @@ $subcategory_result = mysqli_query(
                                             name="status"
                                             class="form-control">
 
-                                            <option value="1">
+                                            <option
+                                                value="1"
+                                                <?php
+                                                echo $status === 1
+                                                    ? 'selected'
+                                                    : '';
+                                                ?>>
+
                                                 Active
+
                                             </option>
 
-                                            <option value="0">
+                                            <option
+                                                value="0"
+                                                <?php
+                                                echo $status === 0
+                                                    ? 'selected'
+                                                    : '';
+                                                ?>>
+
                                                 Inactive
+
                                             </option>
 
                                         </select>
@@ -912,7 +1182,11 @@ $subcategory_result = mysqli_query(
                                             name="product_description"
                                             class="form-control description-box"
                                             rows="5"
-                                            placeholder="Enter product description"></textarea>
+                                            placeholder="Enter product description"><?php
+                                                                                    echo htmlspecialchars(
+                                                                                        $product_description
+                                                                                    );
+                                                                                    ?></textarea>
 
                                     </div>
 
@@ -1027,21 +1301,6 @@ $subcategory_result = mysqli_query(
         src="assets/vendors/iCheck/icheck.min.js">
     </script>
 
-    <!-- 
-    <script
-        src="assets/vendors/pnotify/dist/pnotify.js">
-    </script>
-
-
-    <script
-        src="assets/vendors/pnotify/dist/pnotify.buttons.js">
-    </script>
-
-
-    <script
-        src="assets/vendors/pnotify/dist/pnotify.nonblock.js">
-    </script> -->
-
 
     <script
         src="assets/js/custom.min.js">
@@ -1055,6 +1314,7 @@ $subcategory_result = mysqli_query(
 
     <script>
         function loadSubcategories(categoryId) {
+
             const subcategory =
                 document.getElementById("subcategory_id");
 
@@ -1068,7 +1328,9 @@ $subcategory_result = mysqli_query(
             options.forEach(function(option) {
 
                 if (option.value === "") {
+
                     option.style.display = "block";
+
                     return;
                 }
 
@@ -1077,9 +1339,13 @@ $subcategory_result = mysqli_query(
                     option.getAttribute("data-category") ==
                     categoryId
                 ) {
+
                     option.style.display = "block";
+
                 } else {
+
                     option.style.display = "none";
+
                 }
 
             });

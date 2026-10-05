@@ -1,746 +1,1424 @@
+<?php
+
+if (session_status() === PHP_SESSION_NONE) {
+  session_start();
+}
+
+require_once "../config/database.php";
+
+
+/* =========================================================
+   ADMIN CHECK
+========================================================= */
+
+if (!isset($_SESSION['user_id'])) {
+  header("Location: ../login.php");
+  exit;
+}
+
+$user_id = (int) $_SESSION['user_id'];
+
+
+/* =========================================================
+   FETCH ADMIN
+========================================================= */
+
+$stmt = $conn->prepare("
+    SELECT
+        name,
+        role
+    FROM users
+    WHERE user_id = :user_id
+");
+
+$stmt->execute([
+  ':user_id' => $user_id
+]);
+
+$admin = $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+/* =========================================================
+   CHECK ADMIN ROLE
+========================================================= */
+
+if (!$admin || $admin['role'] !== 'admin') {
+  header("Location: ../index.php");
+  exit;
+}
+
+
+/* =========================================================
+   DASHBOARD COUNTS
+========================================================= */
+
+
+/* -------------------------
+   TOTAL PRODUCTS
+------------------------- */
+
+$stmt = $conn->query("
+    SELECT COUNT(*)
+    FROM products
+    WHERE status = 1
+");
+
+$total_products = (int) $stmt->fetchColumn();
+
+
+/* -------------------------
+   TOTAL CATEGORIES
+------------------------- */
+
+$stmt = $conn->query("
+    SELECT COUNT(*)
+    FROM product_category
+");
+
+$total_categories = (int) $stmt->fetchColumn();
+
+
+/* -------------------------
+   TOTAL USERS
+------------------------- */
+
+$stmt = $conn->query("
+    SELECT COUNT(*)
+    FROM users
+    WHERE role = 'user'
+");
+
+$total_users = (int) $stmt->fetchColumn();
+
+
+/* -------------------------
+   TOTAL ORDERS
+------------------------- */
+
+$stmt = $conn->query("
+    SELECT COUNT(*)
+    FROM orders
+");
+
+$total_orders = (int) $stmt->fetchColumn();
+
+
+/* =========================================================
+   RECENT ORDERS
+========================================================= */
+
+/*
+   order_date is not used because it does not exist
+   in your current orders table.
+
+   Latest orders are shown using order_id.
+*/
+
+$stmt = $conn->query("
+    SELECT
+        o.order_id,
+        o.user_id,
+        o.total_amount,
+        o.order_status,
+        u.name
+    FROM orders o
+
+    LEFT JOIN users u
+        ON u.user_id = o.user_id
+
+    ORDER BY o.order_id DESC
+
+    LIMIT 5
+");
+
+$recent_orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+/* =========================================================
+   RECENT PRODUCTS
+========================================================= */
+
+/*
+   Using products.product_price directly
+   so no unknown column from product_prices is required.
+*/
+
+$stmt = $conn->query("
+    SELECT
+        product_id,
+        product_name,
+        product_price,
+        stock_quantity,
+        status
+    FROM products
+    ORDER BY product_id DESC
+    LIMIT 5
+");
+
+$recent_products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-  <!-- Meta, title, CSS, favicons, etc. -->
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <title>Gentelella Alela! | </title>
+  <meta charset="utf-8">
+
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1">
+
+  <title>Flower Shop Admin Dashboard</title>
+
 
   <!-- Bootstrap -->
-  <link href="assets/vendors/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Font Awesome -->
-  <link href="assets/vendors/font-awesome/css/font-awesome.min.css" rel="stylesheet">
-  <!-- NProgress -->
-  <link href="assets/vendors/nprogress/nprogress.css" rel="stylesheet">
-  <!-- bootstrap-progressbar -->
-  <link href="assets/vendors/bootstrap-progressbar/css/bootstrap-progressbar-3.3.4.min.css" rel="stylesheet">
-  <!-- bootstrap-daterangepicker -->
-  <link href="assets/vendors/bootstrap-daterangepicker/daterangepicker.css" rel="stylesheet">
+  <link
+    href="assets/vendors/bootstrap/dist/css/bootstrap.min.css"
+    rel="stylesheet">
 
-  <!-- Custom Theme Style -->
-  <link href="assets/css/custom.min.css" rel="stylesheet">
+
+  <!-- Font Awesome -->
+  <link
+    href="assets/vendors/font-awesome/css/font-awesome.min.css"
+    rel="stylesheet">
+
+
+  <!-- NProgress -->
+  <link
+    href="assets/vendors/nprogress/nprogress.css"
+    rel="stylesheet">
+
+
+  <!-- Custom Theme -->
+  <link
+    href="assets/css/custom.min.css"
+    rel="stylesheet">
+
+
+  <style>
+    /* =====================================================
+           DASHBOARD CARDS
+        ===================================================== */
+
+    .dashboard-card {
+
+      background: #ffffff;
+
+      border-radius: 5px;
+
+      padding: 20px;
+
+      min-height: 130px;
+
+      margin-bottom: 20px;
+
+      box-shadow:
+        0 1px 5px rgba(0, 0, 0, 0.08);
+    }
+
+
+    .dashboard-card .card-icon {
+
+      float: left;
+
+      width: 60px;
+
+      height: 60px;
+
+      line-height: 60px;
+
+      text-align: center;
+
+      border-radius: 50%;
+
+      background: #f5f5f5;
+
+      font-size: 25px;
+
+      margin-right: 15px;
+    }
+
+
+    .dashboard-card h3 {
+
+      margin: 5px 0;
+
+      font-size: 28px;
+
+      font-weight: 600;
+    }
+
+
+    .dashboard-card p {
+
+      margin: 0;
+
+      color: #777;
+
+      font-size: 14px;
+    }
+
+
+    /* =====================================================
+           DASHBOARD PANELS
+        ===================================================== */
+
+    .dashboard-panel {
+
+      background: #ffffff;
+
+      border: 1px solid #e6e9ed;
+
+      border-radius: 4px;
+
+      margin-bottom: 20px;
+    }
+
+
+    .dashboard-panel .panel-title {
+
+      padding: 15px 20px;
+
+      border-bottom: 1px solid #e6e9ed;
+    }
+
+
+    .dashboard-panel .panel-title h3 {
+
+      margin: 0;
+
+      font-size: 18px;
+
+      font-weight: 600;
+    }
+
+
+    .dashboard-panel .panel-body {
+
+      padding: 20px;
+    }
+
+
+    /* =====================================================
+           QUICK ACTIONS
+        ===================================================== */
+
+    .quick-action {
+
+      display: block;
+
+      padding: 20px 10px;
+
+      text-align: center;
+
+      border: 1px solid #e6e9ed;
+
+      border-radius: 5px;
+
+      color: #555;
+
+      background: #fff;
+
+      margin-bottom: 15px;
+
+      text-decoration: none !important;
+    }
+
+
+    .quick-action:hover {
+
+      background: #f8f8f8;
+
+      color: #555;
+    }
+
+
+    .quick-action i {
+
+      display: block;
+
+      font-size: 30px;
+
+      margin-bottom: 10px;
+    }
+
+
+    .quick-action span {
+
+      font-size: 14px;
+
+      font-weight: 600;
+    }
+
+
+    /* =====================================================
+           TABLE
+        ===================================================== */
+
+    .dashboard-table {
+
+      width: 100%;
+    }
+
+
+    .dashboard-table th {
+
+      background: #f7f7f7;
+
+      padding: 12px;
+
+      font-size: 13px;
+    }
+
+
+    .dashboard-table td {
+
+      padding: 12px;
+
+      border-top: 1px solid #eee;
+
+      font-size: 13px;
+    }
+
+
+    /* =====================================================
+           STATUS
+        ===================================================== */
+
+    .status {
+
+      padding: 5px 10px;
+
+      border-radius: 3px;
+
+      font-size: 11px;
+
+      font-weight: 600;
+
+      display: inline-block;
+    }
+
+
+    .status-success {
+
+      background: #dff0d8;
+
+      color: #3c763d;
+    }
+
+
+    .status-warning {
+
+      background: #fcf8e3;
+
+      color: #8a6d3b;
+    }
+
+
+    .status-danger {
+
+      background: #f2dede;
+
+      color: #a94442;
+    }
+
+
+    /* =====================================================
+           PRODUCT STATUS
+        ===================================================== */
+
+    .product-active {
+
+      color: #3c763d;
+
+      font-weight: 600;
+    }
+
+
+    .product-inactive {
+
+      color: #a94442;
+
+      font-weight: 600;
+    }
+
+
+    /* =====================================================
+           PAGE TITLE
+        ===================================================== */
+
+    .dashboard-heading {
+
+      margin-bottom: 20px;
+    }
+
+
+    .dashboard-heading h3 {
+
+      margin-top: 0;
+
+      margin-bottom: 5px;
+
+      font-weight: 600;
+    }
+
+
+    .dashboard-heading p {
+
+      color: #777;
+
+      margin: 0;
+    }
+  </style>
+
 </head>
 
+
 <body class="nav-md">
+
+
   <div class="container body">
+
+
     <div class="main_container">
+
+
+      <!-- =====================================================
+         SIDEBAR
+         
+         YOUR ORIGINAL SIDEBAR
+         NO CHANGE
+    ====================================================== -->
+
       <?php include 'sidebar.php'; ?>
-    </div>
 
-    <!-- top navigation -->
-    <div class="top_nav">
-      <div class="nav_menu">
-        <nav>
-          <div class="nav toggle">
-            <a id="menu_toggle"><i class="fa fa-bars"></i></a>
-          </div>
 
-          <ul class="nav navbar-nav navbar-right">
-            <li class="">
-              <a href="javascript:;" class="user-profile dropdown-toggle" data-toggle="dropdown" aria-expanded="false">
-                <img src="assets/images/img.jpg" alt="">John Doe
-                <span class=" fa fa-angle-down"></span>
+      <!-- =====================================================
+         TOP NAVIGATION
+    ====================================================== -->
+
+      <div class="top_nav">
+
+        <div class="nav_menu">
+
+          <nav>
+
+
+            <!-- MENU BUTTON -->
+
+            <div class="nav toggle">
+
+              <a id="menu_toggle">
+
+                <i class="fa fa-bars"></i>
+
               </a>
-              <ul class="dropdown-menu dropdown-usermenu pull-right">
-                <li><a href="javascript:;"> Profile</a></li>
-                <li>
-                  <a href="javascript:;">
-                    <span class="badge bg-red pull-right">50%</span>
-                    <span>Settings</span>
-                  </a>
-                </li>
-                <li><a href="javascript:;">Help</a></li>
-                <li><a href="login.php"><i class="fa fa-sign-out pull-right"></i> Log Out</a></li>
-              </ul>
-            </li>
 
-            <li role="presentation" class="dropdown">
-              <a href="javascript:;" class="dropdown-toggle info-number" data-toggle="dropdown" aria-expanded="false">
-                <i class="fa fa-envelope-o"></i>
-                <span class="badge bg-green">6</span>
-              </a>
-              <ul id="menu1" class="dropdown-menu list-unstyled msg_list" role="menu">
-                <li>
-                  <a>
-                    <span class="image"><img src="assets/images/img.jpg" alt="Profile Image" /></span>
-                    <span>
-                      <span>John Smith</span>
-                      <span class="time">3 mins ago</span>
-                    </span>
-                    <span class="message">
-                      Film festivals used to be do-or-die moments for movie makers. They were where...
-                    </span>
-                  </a>
-                </li>
-                <li>
-                  <a>
-                    <span class="image"><img src="assets/images/img.jpg" alt="Profile Image" /></span>
-                    <span>
-                      <span>John Smith</span>
-                      <span class="time">3 mins ago</span>
-                    </span>
-                    <span class="message">
-                      Film festivals used to be do-or-die moments for movie makers. They were where...
-                    </span>
-                  </a>
-                </li>
-                <li>
-                  <a>
-                    <span class="image"><img src="assets/images/img.jpg" alt="Profile Image" /></span>
-                    <span>
-                      <span>John Smith</span>
-                      <span class="time">3 mins ago</span>
-                    </span>
-                    <span class="message">
-                      Film festivals used to be do-or-die moments for movie makers. They were where...
-                    </span>
-                  </a>
-                </li>
-                <li>
-                  <a>
-                    <span class="image"><img src="assets/images/img.jpg" alt="Profile Image" /></span>
-                    <span>
-                      <span>John Smith</span>
-                      <span class="time">3 mins ago</span>
-                    </span>
-                    <span class="message">
-                      Film festivals used to be do-or-die moments for movie makers. They were where...
-                    </span>
-                  </a>
-                </li>
-                <li>
-                  <div class="text-center">
-                    <a>
-                      <strong>See All Alerts</strong>
-                      <i class="fa fa-angle-right"></i>
+            </div>
+
+
+            <!-- RIGHT MENU -->
+
+            <ul class="nav navbar-nav navbar-right">
+
+
+              <!-- ADMIN PROFILE -->
+
+              <li>
+
+                <a
+                  href="javascript:;"
+                  class="user-profile dropdown-toggle"
+                  data-toggle="dropdown"
+                  aria-expanded="false">
+
+                  <img
+                    src="assets/images/img.jpg"
+                    alt="Profile">
+
+                  <?php
+                  echo htmlspecialchars(
+                    $admin['name']
+                  );
+                  ?>
+
+                  <span
+                    class="fa fa-angle-down"></span>
+
+                </a>
+
+
+                <ul
+                  class="dropdown-menu dropdown-usermenu pull-right">
+
+                  <li>
+
+                    <a href="javascript:;">
+
+                      Profile
+
                     </a>
-                  </div>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </nav>
+
+                  </li>
+
+
+                  <li>
+
+                    <a href="javascript:;">
+
+                      Settings
+
+                    </a>
+
+                  </li>
+
+
+                  <li>
+
+                    <a href="javascript:;">
+
+                      Help
+
+                    </a>
+
+                  </li>
+
+
+                  <li>
+
+                    <a href="../login.php">
+
+                      <i
+                        class="fa fa-sign-out pull-right"></i>
+
+                      Log Out
+
+                    </a>
+
+                  </li>
+
+                </ul>
+
+              </li>
+
+
+              <!-- NOTIFICATION -->
+
+              <li
+                role="presentation"
+                class="dropdown">
+
+                <a
+                  href="javascript:;"
+                  class="dropdown-toggle info-number"
+                  data-toggle="dropdown"
+                  aria-expanded="false">
+
+                  <i
+                    class="fa fa-envelope-o"></i>
+
+                  <span
+                    class="badge bg-green">
+                    0
+                  </span>
+
+                </a>
+
+
+                <ul
+                  id="menu1"
+                  class="dropdown-menu list-unstyled msg_list"
+                  role="menu">
+
+                  <li>
+
+                    <div
+                      class="text-center">
+
+                      <a>
+
+                        <strong>
+                          No New Notifications
+                        </strong>
+
+                      </a>
+
+                    </div>
+
+                  </li>
+
+                </ul>
+
+              </li>
+
+            </ul>
+
+          </nav>
+
+        </div>
+
       </div>
+
+
+      <!-- =====================================================
+         PAGE CONTENT
+    ====================================================== -->
+
+      <div
+        class="right_col"
+        role="main">
+
+        <div>
+
+
+          <!-- =================================================
+                 PAGE HEADING
+            ================================================== -->
+
+          <div class="row">
+
+            <div class="col-md-12">
+
+              <div class="dashboard-heading">
+
+                <h3>
+                  Flower Shop Dashboard
+                </h3>
+
+                <p>
+                  Welcome back,
+                  <?php
+                  echo htmlspecialchars(
+                    $admin['name']
+                  );
+                  ?>.
+                  Manage your flower shop from here.
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =================================================
+                 STATISTICS CARDS
+            ================================================== -->
+
+          <div class="row">
+
+
+            <!-- TOTAL PRODUCTS -->
+
+            <div
+              class="col-md-3 col-sm-6 col-xs-12">
+
+              <div class="dashboard-card">
+
+                <div class="card-icon">
+
+                  <i
+                    class="fa fa-leaf"></i>
+
+                </div>
+
+
+                <p>
+                  Total Products
+                </p>
+
+
+                <h3>
+
+                  <?php
+                  echo $total_products;
+                  ?>
+
+                </h3>
+
+              </div>
+
+            </div>
+
+
+            <!-- TOTAL CATEGORIES -->
+
+            <div
+              class="col-md-3 col-sm-6 col-xs-12">
+
+              <div class="dashboard-card">
+
+                <div class="card-icon">
+
+                  <i
+                    class="fa fa-list"></i>
+
+                </div>
+
+
+                <p>
+                  Total Categories
+                </p>
+
+
+                <h3>
+
+                  <?php
+                  echo $total_categories;
+                  ?>
+
+                </h3>
+
+              </div>
+
+            </div>
+
+
+            <!-- TOTAL ORDERS -->
+
+            <div
+              class="col-md-3 col-sm-6 col-xs-12">
+
+              <div class="dashboard-card">
+
+                <div class="card-icon">
+
+                  <i
+                    class="fa fa-shopping-cart"></i>
+
+                </div>
+
+
+                <p>
+                  Total Orders
+                </p>
+
+
+                <h3>
+
+                  <?php
+                  echo $total_orders;
+                  ?>
+
+                </h3>
+
+              </div>
+
+            </div>
+
+
+            <!-- TOTAL CUSTOMERS -->
+
+            <div
+              class="col-md-3 col-sm-6 col-xs-12">
+
+              <div class="dashboard-card">
+
+                <div class="card-icon">
+
+                  <i
+                    class="fa fa-users"></i>
+
+                </div>
+
+
+                <p>
+                  Total Customers
+                </p>
+
+
+                <h3>
+
+                  <?php
+                  echo $total_users;
+                  ?>
+
+                </h3>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =================================================
+                 QUICK ACTIONS
+            ================================================== -->
+
+          <div class="row">
+
+            <div class="col-md-12">
+
+              <div class="dashboard-panel">
+
+
+                <div class="panel-title">
+
+                  <h3>
+                    Quick Actions
+                  </h3>
+
+                </div>
+
+
+                <div class="panel-body">
+
+                  <div class="row">
+
+
+                    <!-- PRODUCTS -->
+
+                    <div
+                      class="col-md-3 col-sm-6">
+
+                      <a
+                        href="products.php"
+                        class="quick-action">
+
+                        <i
+                          class="fa fa-leaf"></i>
+
+                        <span>
+                          Manage Products
+                        </span>
+
+                      </a>
+
+                    </div>
+
+
+                    <!-- CATEGORIES -->
+
+                    <div
+                      class="col-md-3 col-sm-6">
+
+                      <a
+                        href="category-management.php"
+                        class="quick-action">
+
+                        <i
+                          class="fa fa-list"></i>
+
+                        <span>
+                          Manage Categories
+                        </span>
+
+                      </a>
+
+                    </div>
+
+
+                    <!-- USERS -->
+
+                    <div
+                      class="col-md-3 col-sm-6">
+
+                      <a
+                        href="All_user.php"
+                        class="quick-action">
+
+                        <i
+                          class="fa fa-users"></i>
+
+                        <span>
+                          Manage Users
+                        </span>
+
+                      </a>
+
+                    </div>
+
+
+                    <!-- ORDERS -->
+
+                    <div
+                      class="col-md-3 col-sm-6">
+
+                      <a
+                        href="order-details.php"
+                        class="quick-action">
+
+                        <i
+                          class="fa fa-shopping-cart"></i>
+
+                        <span>
+                          View Orders
+                        </span>
+
+                      </a>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =================================================
+                 RECENT ORDERS
+            ================================================== -->
+
+          <div class="row">
+
+
+            <div class="col-md-7 col-sm-12">
+
+              <div class="dashboard-panel">
+
+
+                <div class="panel-title">
+
+                  <h3>
+                    Recent Orders
+                  </h3>
+
+                </div>
+
+
+                <div class="panel-body">
+
+
+                  <div
+                    class="table-responsive">
+
+                    <table
+                      class="dashboard-table">
+
+                      <thead>
+
+                        <tr>
+
+                          <th>
+                            Order ID
+                          </th>
+
+                          <th>
+                            Customer
+                          </th>
+
+                          <th>
+                            Amount
+                          </th>
+
+                          <th>
+                            Status
+                          </th>
+
+                        </tr>
+
+                      </thead>
+
+
+                      <tbody>
+
+
+                        <?php if (!empty($recent_orders)): ?>
+
+
+                          <?php foreach (
+                            $recent_orders
+                            as $order
+                          ): ?>
+
+
+                            <tr>
+
+
+                              <!-- ORDER ID -->
+
+                              <td>
+
+                                #
+                                <?php
+                                echo (int)
+                                $order['order_id'];
+                                ?>
+
+                              </td>
+
+
+                              <!-- CUSTOMER -->
+
+                              <td>
+
+                                <?php
+
+                                echo htmlspecialchars(
+                                  $order['name']
+                                    ?? 'Guest'
+                                );
+
+                                ?>
+
+                              </td>
+
+
+                              <!-- AMOUNT -->
+
+                              <td>
+
+                                ₹<?php
+
+                                  echo number_format(
+                                    (float)
+                                    (
+                                      $order['total_amount'] ?? 0
+                                    ),
+                                    2
+                                  );
+
+                                  ?>
+
+                              </td>
+
+
+                              <!-- STATUS -->
+
+                              <td>
+
+                                <?php
+
+                                $status =
+                                  strtolower(
+                                    trim(
+                                      $order['order_status']
+                                        ?? 'pending'
+                                    )
+                                  );
+
+
+                                if (
+                                  $status ===
+                                  'completed'
+                                  ||
+                                  $status ===
+                                  'delivered'
+                                ) {
+
+                                  $status_class =
+                                    'status-success';
+                                } elseif (
+                                  $status ===
+                                  'cancelled'
+                                  ||
+                                  $status ===
+                                  'rejected'
+                                ) {
+
+                                  $status_class =
+                                    'status-danger';
+                                } else {
+
+                                  $status_class =
+                                    'status-warning';
+                                }
+
+                                ?>
+
+
+                                <span
+                                  class="status
+                                                        <?php
+                                                        echo $status_class;
+                                                        ?>">
+
+                                  <?php
+
+                                  echo htmlspecialchars(
+                                    ucfirst(
+                                      $status
+                                    )
+                                  );
+
+                                  ?>
+
+                                </span>
+
+                              </td>
+
+
+                            </tr>
+
+
+                          <?php endforeach; ?>
+
+
+                        <?php else: ?>
+
+
+                          <tr>
+
+                            <td
+                              colspan="4"
+                              style="
+                                                    text-align:center;
+                                                    padding:25px;
+                                                ">
+
+                              No orders found.
+
+                            </td>
+
+                          </tr>
+
+
+                        <?php endif; ?>
+
+
+                      </tbody>
+
+                    </table>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            <!-- =================================================
+                     RECENT PRODUCTS
+                ================================================== -->
+
+            <div class="col-md-5 col-sm-12">
+
+              <div class="dashboard-panel">
+
+
+                <div class="panel-title">
+
+                  <h3>
+                    Recent Products
+                  </h3>
+
+                </div>
+
+
+                <div class="panel-body">
+
+
+                  <div
+                    class="table-responsive">
+
+                    <table
+                      class="dashboard-table">
+
+                      <thead>
+
+                        <tr>
+
+                          <th>
+                            Product
+                          </th>
+
+                          <th>
+                            Price
+                          </th>
+
+                          <th>
+                            Stock
+                          </th>
+
+                        </tr>
+
+                      </thead>
+
+
+                      <tbody>
+
+
+                        <?php if (!empty($recent_products)): ?>
+
+
+                          <?php foreach (
+                            $recent_products
+                            as $product
+                          ): ?>
+
+
+                            <tr>
+
+
+                              <!-- PRODUCT -->
+
+                              <td>
+
+                                <?php
+
+                                echo htmlspecialchars(
+                                  $product['product_name']
+                                );
+
+                                ?>
+
+                              </td>
+
+
+                              <!-- PRICE -->
+
+                              <td>
+
+                                ₹<?php
+
+                                  echo number_format(
+                                    (float)
+                                    (
+                                      $product['product_price'] ?? 0
+                                    ),
+                                    2
+                                  );
+
+                                  ?>
+
+                              </td>
+
+
+                              <!-- STOCK -->
+
+                              <td>
+
+                                <?php
+
+                                echo (int)
+                                (
+                                  $product['stock_quantity'] ?? 0
+                                );
+
+                                ?>
+
+                              </td>
+
+
+                            </tr>
+
+
+                          <?php endforeach; ?>
+
+
+                        <?php else: ?>
+
+
+                          <tr>
+
+                            <td
+                              colspan="3"
+                              style="
+                                                    text-align:center;
+                                                    padding:25px;
+                                                ">
+
+                              No products found.
+
+                            </td>
+
+                          </tr>
+
+
+                        <?php endif; ?>
+
+
+                      </tbody>
+
+                    </table>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =================================================
+                 WELCOME PANEL
+            ================================================== -->
+
+          <div class="row">
+
+            <div class="col-md-12">
+
+              <div class="dashboard-panel">
+
+
+
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+        </div>
+
+      </div>
+
+
+      <!-- =====================================================
+         FOOTER
+    ====================================================== -->
+
+      <footer>
+
+        <div class="pull-right">
+
+          Flower Shop Admin Panel
+
+        </div>
+
+        <div class="clearfix"></div>
+
+      </footer>
+
+
     </div>
-    <!-- /top navigation -->
 
-    <!-- page content -->
-    <div class="right_col" role="main">
-      <div class="">
-        <div class="row top_tiles" style="margin: 10px 0;">
-          <div class="col-md-3 col-sm-3 col-xs-6 tile">
-            <span>Total Sessions</span>
-            <h2>231,809</h2>
-            <span class="sparkline_one" style="height: 160px;">
-              <canvas width="200" height="60" style="display: inline-block; vertical-align: top; width: 94px; height: 30px;"></canvas>
-            </span>
-          </div>
-          <div class="col-md-3 col-sm-3 col-xs-6 tile">
-            <span>Total Revenue</span>
-            <h2>$ 231,809</h2>
-            <span class="sparkline_one" style="height: 160px;">
-              <canvas width="200" height="60" style="display: inline-block; vertical-align: top; width: 94px; height: 30px;"></canvas>
-            </span>
-          </div>
-          <div class="col-md-3 col-sm-3 col-xs-6 tile">
-            <span>Total Sessions</span>
-            <h2>231,809</h2>
-            <span class="sparkline_two" style="height: 160px;">
-              <canvas width="200" height="60" style="display: inline-block; vertical-align: top; width: 94px; height: 30px;"></canvas>
-            </span>
-          </div>
-          <div class="col-md-3 col-sm-3 col-xs-6 tile">
-            <span>Total Sessions</span>
-            <h2>231,809</h2>
-            <span class="sparkline_one" style="height: 160px;">
-              <canvas width="200" height="60" style="display: inline-block; vertical-align: top; width: 94px; height: 30px;"></canvas>
-            </span>
-          </div>
-        </div>
-        <br />
-
-
-        <div class="row">
-          <div class="col-md-12 col-sm-12 col-xs-12">
-            <div class="dashboard_graph x_panel">
-              <div class="row x_title">
-                <div class="col-md-6">
-                  <h3>Network Activities <small>Graph title sub-title</small></h3>
-                </div>
-                <div class="col-md-6">
-                  <div id="reportrange" class="pull-right" style="background: #fff; cursor: pointer; padding: 5px 10px; border: 1px solid #ccc">
-                    <i class="glyphicon glyphicon-calendar fa fa-calendar"></i>
-                    <span>December 30, 2014 - January 28, 2015</span> <b class="caret"></b>
-                  </div>
-                </div>
-              </div>
-              <div class="x_content">
-                <div class="demo-container" style="height:250px">
-                  <div id="chart_plot_03" class="demo-placeholder"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-
-        <div class="row">
-          <div class="col-md-4 col-sm-6 col-xs-12">
-            <div class="x_panel fixed_height_320">
-              <div class="x_title">
-                <h2>App Devices <small>Sessions</small></h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-                <h4>App Versions</h4>
-                <div class="widget_summary">
-                  <div class="w_left w_25">
-                    <span>1.5.2</span>
-                  </div>
-                  <div class="w_center w_55">
-                    <div class="progress">
-                      <div class="progress-bar bg-green" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 66%;">
-                        <span class="sr-only">60% Complete</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="w_right w_20">
-                    <span>123k</span>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-
-                <div class="widget_summary">
-                  <div class="w_left w_25">
-                    <span>1.5.3</span>
-                  </div>
-                  <div class="w_center w_55">
-                    <div class="progress">
-                      <div class="progress-bar bg-green" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 45%;">
-                        <span class="sr-only">60% Complete</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="w_right w_20">
-                    <span>53k</span>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-                <div class="widget_summary">
-                  <div class="w_left w_25">
-                    <span>1.5.4</span>
-                  </div>
-                  <div class="w_center w_55">
-                    <div class="progress">
-                      <div class="progress-bar bg-green" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 25%;">
-                        <span class="sr-only">60% Complete</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="w_right w_20">
-                    <span>23k</span>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-                <div class="widget_summary">
-                  <div class="w_left w_25">
-                    <span>1.5.5</span>
-                  </div>
-                  <div class="w_center w_55">
-                    <div class="progress">
-                      <div class="progress-bar bg-green" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 5%;">
-                        <span class="sr-only">60% Complete</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="w_right w_20">
-                    <span>3k</span>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-                <div class="widget_summary">
-                  <div class="w_left w_25">
-                    <span>0.1.5.6</span>
-                  </div>
-                  <div class="w_center w_55">
-                    <div class="progress">
-                      <div class="progress-bar bg-green" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 2%;">
-                        <span class="sr-only">60% Complete</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="w_right w_20">
-                    <span>1k</span>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-
-              </div>
-            </div>
-          </div>
-
-          <div class="col-md-4 col-sm-6 col-xs-12">
-            <div class="x_panel fixed_height_320">
-              <div class="x_title">
-                <h2>Daily users <small>Sessions</small></h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-                <table class="" style="width:100%">
-                  <tr>
-                    <th style="width:37%;">
-                      <p>Top 5</p>
-                    </th>
-                    <th>
-                      <div class="col-lg-7 col-md-7 col-sm-7 col-xs-7">
-                        <p class="">Device</p>
-                      </div>
-                      <div class="col-lg-5 col-md-5 col-sm-5 col-xs-5">
-                        <p class="">Progress</p>
-                      </div>
-                    </th>
-                  </tr>
-                  <tr>
-                    <td>
-                      <canvas id="canvas1" height="140" width="140" style="margin: 15px 10px 10px 0"></canvas>
-                    </td>
-                    <td>
-                      <table class="tile_info">
-                        <tr>
-                          <td>
-                            <p><i class="fa fa-square blue"></i>IOS </p>
-                          </td>
-                          <td>30%</td>
-                        </tr>
-                        <tr>
-                          <td>
-                            <p><i class="fa fa-square green"></i>Android </p>
-                          </td>
-                          <td>10%</td>
-                        </tr>
-                        <tr>
-                          <td>
-                            <p><i class="fa fa-square purple"></i>Blackberry </p>
-                          </td>
-                          <td>20%</td>
-                        </tr>
-                        <tr>
-                          <td>
-                            <p><i class="fa fa-square aero"></i>Symbian </p>
-                          </td>
-                          <td>15%</td>
-                        </tr>
-                        <tr>
-                          <td>
-                            <p><i class="fa fa-square red"></i>Others </p>
-                          </td>
-                          <td>30%</td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="col-md-4 col-sm-6 col-xs-12">
-            <div class="x_panel fixed_height_320">
-              <div class="x_title">
-                <h2>Profile Settings <small>Sessions</small></h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-                <div class="dashboard-widget-content">
-                  <ul class="quick-list">
-                    <li><i class="fa fa-line-chart"></i><a href="#">Achievements</a></li>
-                    <li><i class="fa fa-thumbs-up"></i><a href="#">Favorites</a></li>
-                    <li><i class="fa fa-calendar-o"></i><a href="#">Activities</a></li>
-                    <li><i class="fa fa-cog"></i><a href="#">Settings</a></li>
-                    <li><i class="fa fa-area-chart"></i><a href="#">Logout</a></li>
-                  </ul>
-
-                  <div class="sidebar-widget">
-                    <h4>Profile Completion</h4>
-                    <canvas width="150" height="80" id="chart_gauge_01" class="" style="width: 160px; height: 100px;"></canvas>
-                    <div class="goal-wrapper">
-                      <span id="gauge-text" class="gauge-value gauge-chart pull-left">0</span>
-                      <span class="gauge-value pull-left">%</span>
-                      <span id="goal-text" class="goal-value pull-right">100%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="col-md-4 col-sm-6 col-xs-12 widget_tally_box">
-            <div class="x_panel">
-              <div class="x_title">
-                <h2>User Uptake</h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-
-                <div id="graph_bar" style="width:100%; height:200px;"></div>
-
-                <div class="col-xs-12 bg-white progress_summary">
-
-                  <div class="row">
-                    <div class="progress_title">
-                      <span class="left">Escudor Wireless 1.0</span>
-                      <span class="right">This sis</span>
-                      <div class="clearfix"></div>
-                    </div>
-
-                    <div class="col-xs-2">
-                      <span>SSD</span>
-                    </div>
-                    <div class="col-xs-8">
-                      <div class="progress progress_sm">
-                        <div class="progress-bar bg-green" role="progressbar" data-transitiongoal="89"></div>
-                      </div>
-                    </div>
-                    <div class="col-xs-2 more_info">
-                      <span>89%</span>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="progress_title">
-                      <span class="left">Mobile Access</span>
-                      <span class="right">Smart Phone</span>
-                      <div class="clearfix"></div>
-                    </div>
-
-                    <div class="col-xs-2">
-                      <span>App</span>
-                    </div>
-                    <div class="col-xs-8">
-                      <div class="progress progress_sm">
-                        <div class="progress-bar bg-green" role="progressbar" data-transitiongoal="79"></div>
-                      </div>
-                    </div>
-                    <div class="col-xs-2 more_info">
-                      <span>79%</span>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="progress_title">
-                      <span class="left">WAN access users</span>
-                      <span class="right">Total 69%</span>
-                      <div class="clearfix"></div>
-                    </div>
-
-                    <div class="col-xs-2">
-                      <span>Usr</span>
-                    </div>
-                    <div class="col-xs-8">
-                      <div class="progress progress_sm">
-                        <div class="progress-bar bg-green" role="progressbar" data-transitiongoal="69"></div>
-                      </div>
-                    </div>
-                    <div class="col-xs-2 more_info">
-                      <span>69%</span>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- start of weather widget -->
-          <div class="col-md-4 col-sm-6 col-xs-12">
-            <div class="x_panel">
-              <div class="x_title">
-                <h2>Today's Weather <small>Sessions</small></h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-                <div class="row">
-                  <div class="col-sm-12">
-                    <div class="temperature"><b>Monday</b>, 07:30 AM
-                      <span>F</span>
-                      <span><b>C</b>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="col-sm-4">
-                    <div class="weather-icon">
-                      <span>
-                        <canvas height="84" width="84" id="partly-cloudy-day"></canvas>
-                      </span>
-
-                    </div>
-                  </div>
-                  <div class="col-sm-8">
-                    <div class="weather-text">
-                      <h2>Texas
-                        <br><i>Partly Cloudy Day</i>
-                      </h2>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-sm-12">
-                  <div class="weather-text pull-right">
-                    <h3 class="degrees">23</h3>
-                  </div>
-                </div>
-                <div class="clearfix"></div>
-
-
-                <div class="row weather-days">
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Mon</h2>
-                      <h3 class="degrees">25</h3>
-                      <span>
-                        <canvas id="clear-day" width="32" height="32">
-                        </canvas>
-
-                      </span>
-                      <h5>15
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Tue</h2>
-                      <h3 class="degrees">25</h3>
-                      <canvas height="32" width="32" id="rain"></canvas>
-                      <h5>12
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Wed</h2>
-                      <h3 class="degrees">27</h3>
-                      <canvas height="32" width="32" id="snow"></canvas>
-                      <h5>14
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Thu</h2>
-                      <h3 class="degrees">28</h3>
-                      <canvas height="32" width="32" id="sleet"></canvas>
-                      <h5>15
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Fri</h2>
-                      <h3 class="degrees">28</h3>
-                      <canvas height="32" width="32" id="wind"></canvas>
-                      <h5>11
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="col-sm-2">
-                    <div class="daily-weather">
-                      <h2 class="day">Sat</h2>
-                      <h3 class="degrees">26</h3>
-                      <canvas height="32" width="32" id="cloudy"></canvas>
-                      <h5>10
-                        <i>km/h</i>
-                      </h5>
-                    </div>
-                  </div>
-                  <div class="clearfix"></div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-          <!-- end of weather widget -->
-
-          <div class="col-md-4 col-sm-6 col-xs-12">
-            <div class="x_panel fixed_height_320">
-              <div class="x_title">
-                <h2>Incomes <small>Sessions</small></h2>
-                <ul class="nav navbar-right panel_toolbox">
-                  <li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                  </li>
-                  <li class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>
-                    <ul class="dropdown-menu" role="menu">
-                      <li><a href="#">Settings 1</a>
-                      </li>
-                      <li><a href="#">Settings 2</a>
-                      </li>
-                    </ul>
-                  </li>
-                  <li><a class="close-link"><i class="fa fa-close"></i></a>
-                  </li>
-                </ul>
-                <div class="clearfix"></div>
-              </div>
-              <div class="x_content">
-                <div class="dashboard-widget-content">
-                  <ul class="quick-list">
-                    <li><i class="fa fa-bars"></i><a href="#">Subscription</a></li>
-                    <li><i class="fa fa-bar-chart"></i><a href="#">Auto Renewal</a> </li>
-                    <li><i class="fa fa-support"></i><a href="#">Help Desk</a> </li>
-                    <li><i class="fa fa-heart"></i><a href="#">Donations</a> </li>
-                  </ul>
-
-                  <div class="sidebar-widget">
-                    <h4>Goal</h4>
-                    <canvas width="150" height="80" id="chart_gauge_02" class="" style="width: 160px; height: 100px;"></canvas>
-                    <div class="goal-wrapper">
-                      <span class="gauge-value pull-left">$</span>
-                      <span id="gauge-text2" class="gauge-value pull-left">3,200</span>
-                      <span id="goal-text2" class="goal-value pull-right">$5,000</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- /page content -->
-
-    <!-- footer content -->
-    <footer>
-      <div class="pull-right">
-        Gentelella - Bootstrap Admin Template by <a href="https://colorlib.com">Colorlib</a>
-      </div>
-      <div class="clearfix"></div>
-    </footer>
-    <!-- /footer content -->
-  </div>
   </div>
 
-  <!-- jQuery -->
-  <script src="assets/vendors/jquery/dist/jquery.min.js"></script>
-  <!-- Bootstrap -->
-  <script src="assets/vendors/bootstrap/dist/js/bootstrap.min.js"></script>
-  <!-- FastClick -->
-  <script src="assets/vendors/fastclick/lib/fastclick.js"></script>
-  <!-- NProgress -->
-  <script src="assets/vendors/nprogress/nprogress.js"></script>
-  <!-- Chart.js -->
-  <script src="assets/vendors/Chart.js/dist/Chart.min.js"></script>
-  <!-- jQuery Sparklines -->
-  <script src="assets/vendors/jquery-sparkline/dist/jquery.sparkline.min.js"></script>
-  <!-- morris.js -->
-  <script src="assets/vendors/raphael/raphael.min.js"></script>
-  <script src="assets/vendors/morris.js/morris.min.js"></script>
-  <!-- gauge.js -->
-  <script src="assets/vendors/gauge.js/dist/gauge.min.js"></script>
-  <!-- bootstrap-progressbar -->
-  <script src="assets/vendors/bootstrap-progressbar/bootstrap-progressbar.min.js"></script>
-  <!-- Skycons -->
-  <script src="assets/vendors/skycons/skycons.js"></script>
-  <!-- Flot -->
-  <script src="assets/vendors/Flot/jquery.flot.js"></script>
-  <script src="assets/vendors/Flot/jquery.flot.pie.js"></script>
-  <script src="assets/vendors/Flot/jquery.flot.time.js"></script>
-  <script src="assets/vendors/Flot/jquery.flot.stack.js"></script>
-  <script src="assets/vendors/Flot/jquery.flot.resize.js"></script>
-  <!-- Flot plugins -->
-  <script src="assets/vendors/flot.orderbars/js/jquery.flot.orderBars.js"></script>
-  <script src="assets/vendors/flot-spline/js/jquery.flot.spline.min.js"></script>
-  <script src="assets/vendors/flot.curvedlines/curvedLines.js"></script>
-  <!-- DateJS -->
-  <script src="assets/vendors/DateJS/build/date.js"></script>
-  <!-- bootstrap-daterangepicker -->
-  <script src="assets/vendors/moment/min/moment.min.js"></script>
-  <script src="assets/vendors/bootstrap-daterangepicker/daterangepicker.js"></script>
 
-  <!-- Custom Theme Scripts -->
-  <script src="assets/js/custom.min.js"></script>
+  <!-- =========================================================
+     JAVASCRIPT
+========================================================= -->
+
+  <script
+    src="assets/vendors/jquery/dist/jquery.min.js">
+  </script>
+
+
+  <script
+    src="assets/vendors/bootstrap/dist/js/bootstrap.min.js">
+  </script>
+
+
+  <script
+    src="assets/vendors/fastclick/lib/fastclick.js">
+  </script>
+
+
+  <script
+    src="assets/vendors/nprogress/nprogress.js">
+  </script>
+
+
+  <script
+    src="assets/js/custom.min.js">
+  </script>
+
 
 </body>
 

@@ -133,8 +133,11 @@ try {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             CONSTRAINT fk_user_profile
+
             FOREIGN KEY (user_id)
+
             REFERENCES users(user_id)
+
             ON DELETE CASCADE
         )
     ");
@@ -142,7 +145,7 @@ try {
 
     /* =====================================================
        ADD MISSING USER PROFILE COLUMNS
-       For old existing tables
+       FOR OLD EXISTING TABLES
     ===================================================== */
 
     $conn->exec("
@@ -228,8 +231,11 @@ try {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             CONSTRAINT fk_category
+
             FOREIGN KEY (category_id)
+
             REFERENCES product_category(category_id)
+
             ON DELETE CASCADE
         )
     ");
@@ -263,9 +269,163 @@ try {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             CONSTRAINT fk_subcategory
+
             FOREIGN KEY (subcategory_id)
+
             REFERENCES product_subcategory(subcategory_id)
+
             ON DELETE CASCADE
+        )
+    ");
+
+
+    /* =====================================================
+       ADD PRODUCT EXTRA COLUMNS
+       FOR OLD EXISTING TABLES
+    ===================================================== */
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS brand_name VARCHAR(150)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS color VARCHAR(100)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS size VARCHAR(100)
+    ");
+
+    $conn->exec("
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS material VARCHAR(150)
+    ");
+
+
+    /* =====================================================
+       PRODUCT PRICES TABLE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE TABLE IF NOT EXISTS product_prices (
+
+            price_id SERIAL PRIMARY KEY,
+
+            product_id INTEGER NOT NULL,
+
+            original_price DECIMAL(10,2)
+            NOT NULL DEFAULT 0,
+
+            discount_percentage DECIMAL(5,2)
+            DEFAULT 0,
+
+            selling_price DECIMAL(10,2)
+            NOT NULL DEFAULT 0,
+
+            start_date DATE,
+
+            end_date DATE,
+
+            created_at TIMESTAMP
+            DEFAULT CURRENT_TIMESTAMP,
+
+            CONSTRAINT fk_product_price
+
+            FOREIGN KEY (product_id)
+
+            REFERENCES products(product_id)
+
+            ON DELETE CASCADE
+        )
+    ");
+
+
+    /* =====================================================
+       PRODUCT IMAGES TABLE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE TABLE IF NOT EXISTS product_images (
+
+            image_id SERIAL PRIMARY KEY,
+
+            product_id INTEGER NOT NULL,
+
+            image_name VARCHAR(255) NOT NULL,
+
+            is_primary INTEGER DEFAULT 0,
+
+            created_at TIMESTAMP
+            DEFAULT CURRENT_TIMESTAMP,
+
+            CONSTRAINT fk_product_images
+
+            FOREIGN KEY (product_id)
+
+            REFERENCES products(product_id)
+
+            ON DELETE CASCADE
+        )
+    ");
+
+
+    /* =====================================================
+       CART TABLE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE TABLE IF NOT EXISTS cart (
+
+            cart_id SERIAL PRIMARY KEY,
+
+            user_id INTEGER NOT NULL,
+
+            product_id INTEGER NOT NULL,
+
+            quantity INTEGER NOT NULL DEFAULT 1,
+
+            created_at TIMESTAMP
+            DEFAULT CURRENT_TIMESTAMP,
+
+
+            /* USER FOREIGN KEY */
+
+            CONSTRAINT cart_user_fk
+
+            FOREIGN KEY (user_id)
+
+            REFERENCES users(user_id)
+
+            ON DELETE CASCADE,
+
+
+            /* PRODUCT FOREIGN KEY */
+
+            CONSTRAINT cart_product_fk
+
+            FOREIGN KEY (product_id)
+
+            REFERENCES products(product_id)
+
+            ON DELETE CASCADE,
+
+
+            /* QUANTITY MUST BE GREATER THAN ZERO */
+
+            CONSTRAINT cart_quantity_check
+
+            CHECK (quantity > 0),
+
+
+            /* SAME PRODUCT ONLY ONCE FOR SAME USER */
+
+            CONSTRAINT unique_user_product
+
+            UNIQUE (user_id, product_id)
+
         )
     ");
 
@@ -281,7 +441,8 @@ try {
 
             user_id INTEGER,
 
-            total_amount DECIMAL(10,2) DEFAULT 0,
+            total_amount DECIMAL(10,2)
+            DEFAULT 0,
 
             order_status VARCHAR(50)
             DEFAULT 'pending',
@@ -290,8 +451,11 @@ try {
             DEFAULT CURRENT_TIMESTAMP,
 
             CONSTRAINT fk_order_user
+
             FOREIGN KEY (user_id)
+
             REFERENCES users(user_id)
+
             ON DELETE SET NULL
         )
     ");
@@ -314,14 +478,22 @@ try {
 
             price DECIMAL(10,2) DEFAULT 0,
 
+
             CONSTRAINT fk_order
+
             FOREIGN KEY (order_id)
+
             REFERENCES orders(order_id)
+
             ON DELETE CASCADE,
 
+
             CONSTRAINT fk_product
+
             FOREIGN KEY (product_id)
+
             REFERENCES products(product_id)
+
             ON DELETE CASCADE
         )
     ");
@@ -339,6 +511,7 @@ try {
         FROM users u
 
         LEFT JOIN user_profile p
+
             ON p.user_id = u.user_id
 
         WHERE p.user_id IS NULL
@@ -349,28 +522,84 @@ try {
        INDEXES
     ===================================================== */
 
+
+    /* USER PROFILE */
+
     $conn->exec("
         CREATE INDEX IF NOT EXISTS
         idx_user_profile_user_id
+
         ON user_profile(user_id)
     ");
 
-    $conn->exec("
-        CREATE INDEX IF NOT EXISTS
-        idx_orders_user_id
-        ON orders(user_id)
-    ");
 
-    $conn->exec("
-        CREATE INDEX IF NOT EXISTS
-        idx_order_items_order_id
-        ON order_items(order_id)
-    ");
+    /* PRODUCTS */
 
     $conn->exec("
         CREATE INDEX IF NOT EXISTS
         idx_products_subcategory
+
         ON products(subcategory_id)
+    ");
+
+
+    /* PRODUCT PRICES */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_product_prices_product_id
+
+        ON product_prices(product_id)
+    ");
+
+
+    /* PRODUCT IMAGES */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_product_images_product_id
+
+        ON product_images(product_id)
+    ");
+
+
+    /* CART USER */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_cart_user_id
+
+        ON cart(user_id)
+    ");
+
+
+    /* CART PRODUCT */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_cart_product_id
+
+        ON cart(product_id)
+    ");
+
+
+    /* ORDERS USER */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_orders_user_id
+
+        ON orders(user_id)
+    ");
+
+
+    /* ORDER ITEMS */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_order_items_order_id
+
+        ON order_items(order_id)
     ");
 } catch (PDOException $e) {
 
