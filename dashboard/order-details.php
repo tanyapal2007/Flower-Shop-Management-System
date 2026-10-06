@@ -1,4 +1,4 @@
-```php
+
 <?php
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -1618,4 +1618,3 @@ if ($selected_user_id > 0) {
 </body>
 
 </html>
-```

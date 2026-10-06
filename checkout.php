@@ -21,87 +21,241 @@ $user_id = (int) $_SESSION['user_id'];
 
 
 /* =========================================================
-   FETCH CART ITEMS
+   BUY NOW CHECK
 ========================================================= */
 
-$sql = "
-    SELECT
-        c.cart_id,
-        c.product_id,
-        c.quantity,
+$is_buy_now = false;
 
-        p.product_name,
-        p.product_code,
-        p.stock_quantity,
-        p.product_image,
-
-        ps.subcategory_name,
-        pc.category_name,
-
-        pp.selling_price,
-
-        pi.image_name
-
-    FROM cart c
-
-    INNER JOIN products p
-        ON c.product_id = p.product_id
-
-    LEFT JOIN product_subcategory ps
-        ON p.subcategory_id = ps.subcategory_id
-
-    LEFT JOIN product_category pc
-        ON ps.category_id = pc.category_id
-
-    LEFT JOIN LATERAL
-    (
-        SELECT
-            product_prices.selling_price
-        FROM product_prices
-        WHERE product_prices.product_id = p.product_id
-        ORDER BY product_prices.price_id DESC
-        LIMIT 1
-    ) pp ON TRUE
-
-    LEFT JOIN LATERAL
-    (
-        SELECT
-            product_images.image_name
-        FROM product_images
-        WHERE product_images.product_id = p.product_id
-        ORDER BY
-            product_images.is_primary DESC,
-            product_images.image_id DESC
-        LIMIT 1
-    ) pi ON TRUE
-
-    WHERE c.user_id = :user_id
-
-    ORDER BY c.cart_id DESC
-";
+$buy_now_product_id = 0;
 
 
-try {
+/*
+|--------------------------------------------------------------------------
+| If URL is:
+| checkout.php?buy_now=1&product_id=5
+|--------------------------------------------------------------------------
+*/
 
-    $stmt = $conn->prepare($sql);
+if (
+    isset($_GET['buy_now']) &&
+    $_GET['buy_now'] == '1' &&
+    isset($_GET['product_id'])
+) {
 
-    $stmt->execute([
-        ':user_id' => $user_id
-    ]);
+    $buy_now_product_id = (int) $_GET['product_id'];
 
-    $cart_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
+    if ($buy_now_product_id > 0) {
 
-    die("Cart Fetch Error: " .
-        htmlspecialchars($e->getMessage()));
+        $is_buy_now = true;
+    }
 }
 
 
 /* =========================================================
-   CHECK EMPTY CART
+   CHECKOUT PRODUCTS
 ========================================================= */
 
-if (empty($cart_items)) {
+$checkout_items = [];
+
+
+/* =========================================================
+   BUY NOW PRODUCT
+========================================================= */
+
+if ($is_buy_now) {
+
+
+    $sql = "
+        SELECT
+            p.product_id,
+            p.product_name,
+            p.product_code,
+            p.stock_quantity,
+            p.product_image,
+
+            ps.subcategory_name,
+            pc.category_name,
+
+            pp.selling_price,
+
+            pi.image_name
+
+        FROM products p
+
+        LEFT JOIN product_subcategory ps
+            ON p.subcategory_id = ps.subcategory_id
+
+        LEFT JOIN product_category pc
+            ON ps.category_id = pc.category_id
+
+        LEFT JOIN LATERAL
+        (
+            SELECT
+                product_prices.selling_price
+            FROM product_prices
+            WHERE product_prices.product_id = p.product_id
+            ORDER BY product_prices.price_id DESC
+            LIMIT 1
+        ) pp ON TRUE
+
+        LEFT JOIN LATERAL
+        (
+            SELECT
+                product_images.image_name
+            FROM product_images
+            WHERE product_images.product_id = p.product_id
+            ORDER BY
+                product_images.is_primary DESC,
+                product_images.image_id DESC
+            LIMIT 1
+        ) pi ON TRUE
+
+        WHERE
+            p.product_id = :product_id
+            AND p.status = 1
+
+        LIMIT 1
+    ";
+
+
+    try {
+
+        $stmt = $conn->prepare($sql);
+
+        $stmt->execute([
+            ':product_id' => $buy_now_product_id
+        ]);
+
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+        /* =================================================
+           CHECK PRODUCT EXISTS
+        ================================================= */
+
+        if (!$product) {
+
+            header("Location: index.php");
+            exit;
+        }
+
+
+        /* =================================================
+           CHECK STOCK
+        ================================================= */
+
+        if (
+            isset($product['stock_quantity']) &&
+            (int) $product['stock_quantity'] <= 0
+        ) {
+
+            header("Location: index.php");
+            exit;
+        }
+
+
+        /* =================================================
+           BUY NOW QUANTITY = 1
+        ================================================= */
+
+        $product['quantity'] = 1;
+
+        $checkout_items[] = $product;
+    } catch (PDOException $e) {
+
+        die("Buy Now Product Fetch Error: " .
+            htmlspecialchars($e->getMessage()));
+    }
+}
+
+
+/* =========================================================
+   NORMAL CART CHECKOUT
+========================================================= */ else {
+
+
+    $sql = "
+        SELECT
+            c.cart_id,
+            c.product_id,
+            c.quantity,
+
+            p.product_name,
+            p.product_code,
+            p.stock_quantity,
+            p.product_image,
+
+            ps.subcategory_name,
+            pc.category_name,
+
+            pp.selling_price,
+
+            pi.image_name
+
+        FROM cart c
+
+        INNER JOIN products p
+            ON c.product_id = p.product_id
+
+        LEFT JOIN product_subcategory ps
+            ON p.subcategory_id = ps.subcategory_id
+
+        LEFT JOIN product_category pc
+            ON ps.category_id = pc.category_id
+
+        LEFT JOIN LATERAL
+        (
+            SELECT
+                product_prices.selling_price
+            FROM product_prices
+            WHERE product_prices.product_id = p.product_id
+            ORDER BY product_prices.price_id DESC
+            LIMIT 1
+        ) pp ON TRUE
+
+        LEFT JOIN LATERAL
+        (
+            SELECT
+                product_images.image_name
+            FROM product_images
+            WHERE product_images.product_id = p.product_id
+            ORDER BY
+                product_images.is_primary DESC,
+                product_images.image_id DESC
+            LIMIT 1
+        ) pi ON TRUE
+
+        WHERE
+            c.user_id = :user_id
+            AND p.status = 1
+
+        ORDER BY c.cart_id DESC
+    ";
+
+
+    try {
+
+        $stmt = $conn->prepare($sql);
+
+        $stmt->execute([
+            ':user_id' => $user_id
+        ]);
+
+        $checkout_items =
+            $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+
+        die("Cart Fetch Error: " .
+            htmlspecialchars($e->getMessage()));
+    }
+}
+
+
+/* =========================================================
+   CHECK EMPTY CHECKOUT
+========================================================= */
+
+if (empty($checkout_items)) {
 
     header("Location: cart.php");
     exit;
@@ -114,7 +268,8 @@ if (empty($cart_items)) {
 
 $subtotal = 0;
 
-foreach ($cart_items as $item) {
+
+foreach ($checkout_items as $item) {
 
     $price = (float) (
         $item['selling_price'] ?? 0
@@ -124,7 +279,8 @@ foreach ($cart_items as $item) {
         $item['quantity'] ?? 1
     );
 
-    $subtotal += $price * $quantity;
+    $subtotal +=
+        $price * $quantity;
 }
 
 
@@ -139,12 +295,12 @@ $shipping = 3;
    GRAND TOTAL
 ========================================================= */
 
-$grand_total = $subtotal + $shipping;
+$grand_total =
+    $subtotal + $shipping;
 
 
 /* =========================================================
    FETCH USER NAME AND PHONE
-   FROM users TABLE
 ========================================================= */
 
 $user_sql = "
@@ -159,13 +315,15 @@ $user_sql = "
 
 try {
 
-    $user_stmt = $conn->prepare($user_sql);
+    $user_stmt =
+        $conn->prepare($user_sql);
 
     $user_stmt->execute([
         ':user_id' => $user_id
     ]);
 
-    $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+    $user =
+        $user_stmt->fetch(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
 
     die("User Fetch Error: " .
@@ -175,7 +333,7 @@ try {
 
 /* =========================================================
    FETCH ADDRESS
-   FROM user_profile TABLE
+   FROM user_profile
 ========================================================= */
 
 $profile_sql = "
@@ -193,13 +351,15 @@ $profile_sql = "
 
 try {
 
-    $profile_stmt = $conn->prepare($profile_sql);
+    $profile_stmt =
+        $conn->prepare($profile_sql);
 
     $profile_stmt->execute([
         ':user_id' => $user_id
     ]);
 
-    $profile = $profile_stmt->fetch(PDO::FETCH_ASSOC);
+    $profile =
+        $profile_stmt->fetch(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
 
     die("Profile Fetch Error: " .
@@ -211,24 +371,31 @@ try {
    USER DETAILS
 ========================================================= */
 
-$full_name = $user['name'] ?? '';
+$full_name =
+    $user['name'] ?? '';
 
-$phone = $user['phone'] ?? '';
+$phone =
+    $user['phone'] ?? '';
 
 
 /* =========================================================
    ADDRESS DETAILS
 ========================================================= */
 
-$address = $profile['address'] ?? '';
+$address =
+    $profile['address'] ?? '';
 
-$city = $profile['city'] ?? '';
+$city =
+    $profile['city'] ?? '';
 
-$state = $profile['state'] ?? '';
+$state =
+    $profile['state'] ?? '';
 
-$pincode = $profile['pincode'] ?? '';
+$pincode =
+    $profile['pincode'] ?? '';
 
-$country = $profile['country'] ?? 'India';
+$country =
+    $profile['country'] ?? 'India';
 
 
 /* =========================================================
@@ -978,6 +1145,34 @@ $has_address =
             method="POST">
 
 
+            <!-- =================================================
+                 BUY NOW INFORMATION
+            ================================================== -->
+
+            <?php if ($is_buy_now) { ?>
+
+                <input
+                    type="hidden"
+                    name="buy_now"
+                    value="1">
+
+                <input
+                    type="hidden"
+                    name="product_id"
+                    value="<?php
+                            echo (int) $buy_now_product_id;
+                            ?>">
+
+            <?php } else { ?>
+
+                <input
+                    type="hidden"
+                    name="buy_now"
+                    value="0">
+
+            <?php } ?>
+
+
             <div class="checkout-grid">
 
 
@@ -1310,14 +1505,14 @@ $has_address =
 
                 <!-- =================================================
                      RIGHT SIDE
-                ================================================== -->
+                ================================================= -->
 
                 <div>
 
 
                     <!-- =================================================
                          YOUR ORDER
-                    ================================================== -->
+                    ================================================= -->
 
                     <div class="checkout-box">
 
@@ -1329,7 +1524,7 @@ $has_address =
                         </h3>
 
 
-                        <?php foreach ($cart_items as $item) { ?>
+                        <?php foreach ($checkout_items as $item) { ?>
 
 
                             <?php
@@ -1617,7 +1812,9 @@ $has_address =
                         </div>
 
 
-                        <!-- GRAND TOTAL HIDDEN -->
+                        <!-- =================================================
+                             HIDDEN CHECKOUT VALUES
+                        ================================================== -->
 
                         <input
                             type="hidden"
@@ -1625,11 +1822,30 @@ $has_address =
                             value="<?php
                                     echo htmlspecialchars(
                                         $grand_total
-                                    );
-                                    ?>">
+                                    ); ?>">
 
 
-                        <!-- PLACE ORDER -->
+                        <input
+                            type="hidden"
+                            name="subtotal"
+                            value="<?php
+                                    echo htmlspecialchars(
+                                        $subtotal
+                                    ); ?>">
+
+
+                        <input
+                            type="hidden"
+                            name="shipping"
+                            value="<?php
+                                    echo htmlspecialchars(
+                                        $shipping
+                                    ); ?>">
+
+
+                        <!-- =================================================
+                             PLACE ORDER
+                        ================================================== -->
 
                         <button
                             type="submit"

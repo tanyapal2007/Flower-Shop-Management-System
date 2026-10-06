@@ -348,10 +348,39 @@ if ($is_logged_in && isset($_SESSION['role'])) {
 
 
                     <!-- ==================================================
+                         WISHLIST ICON
+                    ================================================== -->
+
+                    <a
+                        href="wishlist.php"
+                        title="Wishlist"
+                        style="
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-right: 12px;
+                            text-decoration: none;
+                        ">
+
+                        <i
+                            class="fa fa-heart"
+                            style="
+                                font-size: 20px;
+                                color: #ffffff;
+                            ">
+                        </i>
+
+                    </a>
+
+
+
+                    <!-- ==================================================
                          CART ICON
                     ================================================== -->
 
-                    <a href="cart.php">
+                    <a
+                        href="cart.php"
+                        title="My Cart">
 
                         <img
                             src="images/cart.png"

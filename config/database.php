@@ -145,7 +145,6 @@ try {
 
     /* =====================================================
        ADD MISSING USER PROFILE COLUMNS
-       FOR OLD EXISTING TABLES
     ===================================================== */
 
     $conn->exec("
@@ -281,7 +280,6 @@ try {
 
     /* =====================================================
        ADD PRODUCT EXTRA COLUMNS
-       FOR OLD EXISTING TABLES
     ===================================================== */
 
     $conn->exec("
@@ -390,9 +388,6 @@ try {
             created_at TIMESTAMP
             DEFAULT CURRENT_TIMESTAMP,
 
-
-            /* USER FOREIGN KEY */
-
             CONSTRAINT cart_user_fk
 
             FOREIGN KEY (user_id)
@@ -400,9 +395,6 @@ try {
             REFERENCES users(user_id)
 
             ON DELETE CASCADE,
-
-
-            /* PRODUCT FOREIGN KEY */
 
             CONSTRAINT cart_product_fk
 
@@ -412,20 +404,52 @@ try {
 
             ON DELETE CASCADE,
 
-
-            /* QUANTITY MUST BE GREATER THAN ZERO */
-
             CONSTRAINT cart_quantity_check
 
             CHECK (quantity > 0),
 
-
-            /* SAME PRODUCT ONLY ONCE FOR SAME USER */
-
             CONSTRAINT unique_user_product
 
             UNIQUE (user_id, product_id)
+        )
+    ");
 
+
+    /* =====================================================
+       WISHLIST TABLE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE TABLE IF NOT EXISTS wishlist (
+
+            wishlist_id SERIAL PRIMARY KEY,
+
+            user_id INTEGER NOT NULL,
+
+            product_id INTEGER NOT NULL,
+
+            created_at TIMESTAMP
+            DEFAULT CURRENT_TIMESTAMP,
+
+            CONSTRAINT wishlist_user_fk
+
+            FOREIGN KEY (user_id)
+
+            REFERENCES users(user_id)
+
+            ON DELETE CASCADE,
+
+            CONSTRAINT wishlist_product_fk
+
+            FOREIGN KEY (product_id)
+
+            REFERENCES products(product_id)
+
+            ON DELETE CASCADE,
+
+            CONSTRAINT wishlist_unique_user_product
+
+            UNIQUE (user_id, product_id)
         )
     ");
 
@@ -478,7 +502,6 @@ try {
 
             price DECIMAL(10,2) DEFAULT 0,
 
-
             CONSTRAINT fk_order
 
             FOREIGN KEY (order_id)
@@ -487,7 +510,6 @@ try {
 
             ON DELETE CASCADE,
 
-
             CONSTRAINT fk_product
 
             FOREIGN KEY (product_id)
@@ -495,6 +517,32 @@ try {
             REFERENCES products(product_id)
 
             ON DELETE CASCADE
+        )
+    ");
+
+
+    /* =====================================================
+       CONTACT MESSAGES TABLE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE TABLE IF NOT EXISTS contact_messages (
+
+            message_id SERIAL PRIMARY KEY,
+
+            name VARCHAR(100) NOT NULL,
+
+            email VARCHAR(150) NOT NULL,
+
+            phone VARCHAR(20),
+
+            message TEXT NOT NULL,
+
+            status VARCHAR(20)
+            DEFAULT 'new',
+
+            created_at TIMESTAMP
+            DEFAULT CURRENT_TIMESTAMP
         )
     ");
 
@@ -521,7 +569,6 @@ try {
     /* =====================================================
        INDEXES
     ===================================================== */
-
 
     /* USER PROFILE */
 
@@ -583,6 +630,26 @@ try {
     ");
 
 
+    /* WISHLIST USER */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_wishlist_user_id
+
+        ON wishlist(user_id)
+    ");
+
+
+    /* WISHLIST PRODUCT */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_wishlist_product_id
+
+        ON wishlist(product_id)
+    ");
+
+
     /* ORDERS USER */
 
     $conn->exec("
@@ -601,6 +668,30 @@ try {
 
         ON order_items(order_id)
     ");
+
+
+    /* =====================================================
+       CONTACT MESSAGES INDEX - STATUS
+    ===================================================== */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_contact_messages_status
+
+        ON contact_messages(status)
+    ");
+
+
+    /* =====================================================
+       CONTACT MESSAGES INDEX - CREATED DATE
+    ===================================================== */
+
+    $conn->exec("
+        CREATE INDEX IF NOT EXISTS
+        idx_contact_messages_created_at
+
+        ON contact_messages(created_at)
+    ");
 } catch (PDOException $e) {
 
     die("Database Error: " .
@@ -608,3 +699,4 @@ try {
 }
 
 ?>
+
